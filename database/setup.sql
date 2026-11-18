@@ -1,0 +1,17 @@
+begin;
+create table public.mia_projects(id uuid primary key,user_id uuid not null references auth.users(id) on delete cascade,title text not null,tool text not null,payload jsonb not null,updated_at timestamptz not null default now());
+alter table public.mia_projects enable row level security;
+create policy mia_owner on public.mia_projects for all to authenticated using((select auth.uid())=user_id) with check((select auth.uid())=user_id);
+grant select,insert,update,delete on public.mia_projects to authenticated;
+revoke all on public.mia_projects from anon;
+create table public.mia_daily_quota(user_id uuid not null references auth.users(id) on delete cascade,day date not null,requests integer not null,primary key(user_id,day));
+create table public.mia_usage(id uuid primary key,user_id uuid not null references auth.users(id) on delete cascade,amount numeric not null check(amount>=0),created_at timestamptz not null default now());
+alter table public.mia_daily_quota enable row level security;
+alter table public.mia_usage enable row level security;
+revoke all on public.mia_daily_quota,public.mia_usage from anon,authenticated;
+grant all on public.mia_daily_quota,public.mia_usage to service_role;
+create function public.mia_take_quota(user_uuid uuid,daily_limit integer) returns boolean language plpgsql security invoker set search_path='' as $$declare n integer;begin if daily_limit<=0 then return false;end if;insert into public.mia_daily_quota values(user_uuid,current_date,1) on conflict(user_id,day) do update set requests=public.mia_daily_quota.requests+1 where public.mia_daily_quota.requests<daily_limit returning requests into n;return n is not null;end;$$;
+create function public.mia_reserve_budget(ticket uuid,user_uuid uuid,amount numeric,cap numeric) returns boolean language plpgsql security invoker set search_path='' as $$declare total numeric;begin if amount<0 or cap<=0 then return false;end if;perform pg_catalog.pg_advisory_xact_lock(629447231);select coalesce(sum(u.amount),0) into total from public.mia_usage u;if total+amount>cap then return false;end if;insert into public.mia_usage(id,user_id,amount)values(ticket,user_uuid,amount);return true;end;$$;
+revoke all on function public.mia_take_quota(uuid,integer),public.mia_reserve_budget(uuid,uuid,numeric,numeric) from public,anon,authenticated;
+grant execute on function public.mia_take_quota(uuid,integer),public.mia_reserve_budget(uuid,uuid,numeric,numeric) to service_role;
+commit;
