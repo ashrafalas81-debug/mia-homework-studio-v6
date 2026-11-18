@@ -160,7 +160,8 @@ ${isLab ? 'Lab rule: NEVER invent measurements. Use the student\'s LAB DATA; if 
 id = "s${b.index + 1}". heading = the section heading exactly as given (you may improve wording).
 keyPoint: ONE exam-worthy sentence (≤ 30 words) that captures the most important idea of this section, in the same language; "" for Abstract, Aim or Conclusion.`,
     JSON.stringify({ title: b.title, allSections: b.outline, thisSection: b.section, instruction: b.instruction || null, previous: b.previous || null, professorInstructions: o.instructions.slice(0, 6000), labData: o.labData?.slice(0, 6000) || '', SOURCES: sources }),
-    Math.min(9000, Math.round(b.section.words * 2.6) + 1200), 'writer', 'medium');
+    // Generous budget: reasoning models spend tokens before writing; low effort keeps sections fast.
+    Math.min(12000, Math.max(5000, Math.round(b.section.words * 3) + 2500)), 'writer', 'low');
   out.id = 's' + (b.index + 1);
   const invalid = normalizeCitations(out, sources.map(s => ({ ...s, accessLevel: 'abstract', retracted: false, abstract: s.abstract || 'x' } as any)));
   // Drop any citation that does not name a real fetched source instead of failing the whole section.
@@ -258,7 +259,7 @@ ${o.imagery === 'diagrams' ? 'Avoid image_points/image_full.' : o.imagery === 'p
 For every slide: title (≤60 chars, specific), layout, keyMessage (one sentence), content (40–90 words: the facts, numbers, steps or comparisons this slide must teach, from CONTENT/SOURCES; mark source ids in [brackets]), custom=${o.premium ? `true ONLY for at most ${Math.max(2, Math.round(o.slides * 0.3))} slides whose idea needs a bespoke diagram that no layout expresses (e.g. an anatomical schematic, a mechanism pathway, a force diagram); false otherwise` : 'false'}.
 Language of all text: ${o.language}. Audience: ${o.audience}.`,
     JSON.stringify({ topic: o.topic, CONTENT: o.content.slice(0, 40000), SOURCES: o.sources.slice(0, 20).map((s: any) => ({ id: s.id, title: s.title, year: s.year, abstract: String(s.abstract || '').slice(0, 700) })) }),
-    Math.min(12000, 600 + o.slides * 260), 'writer', 'medium');
+    Math.min(14000, Math.max(5000, 2000 + o.slides * 320)), 'writer', 'low');
   plan.slides = plan.slides.slice(0, o.slides);
   if (plan.slides[0]) plan.slides[0].layout = 'cover';
   if (!o.premium) plan.slides.forEach(s => { s.custom = false; });
@@ -304,7 +305,7 @@ FIELD RULES (fill only fields the layout uses; others: "" or []):
 - notes: ${b.notes ? '80–140 words of natural speaker notes that teach the slide (explanation, example, exam tip).' : '""'}
 Language of all visible text: ${b.language}${b.language === 'Arabic' ? ' (keep medical terms in English where natural)' : ''}. Audience: ${b.audience}. Return exactly one entry per slide, same order.`,
     JSON.stringify({ DECK_TITLE: b.deckTitle, SLIDES: b.slides, CURRENT: b.current || null, INSTRUCTION: b.instruction || null, REFERENCES: b.referencesText || '' }),
-    Math.min(9000, 900 + b.slides.length * (b.notes ? 650 : 420)), 'writer', 'low');
+    Math.min(14000, Math.max(5000, 2500 + b.slides.length * (b.notes ? 800 : 520))), 'writer', 'low');
   if (out.slides.length < b.slides.length) throw new AIError('INVALID_OUTPUT', 'The writer returned fewer slides than requested.', 502);
   return c.json({ slides: out.slides.slice(0, b.slides.length) });
 });
