@@ -44,6 +44,7 @@ export function mockAI(_schema: unknown, system: string, user: string): any {
     const num = Number((m.match(/\d+/) || [])[0]);
     if (/الكفر|الغلاف|الكافر/.test(m)) return { action: 'cover', targets: [], files: [], instruction: m, reply: 'هعدّل الغلاف.' };
     if (/ابعت|فين الملف|نزّله|نزله|عاوز الملف/.test(m)) return { action: 'send_files', targets: [], files: u.AVAILABLE_FILES, instruction: '', reply: 'الملفات تحت، دوس على الزرار.' };
+    if (u.HAS_IMAGE && /ضيف/.test(m)) return { action: 'revise', targets: [num || 2], files: [], instruction: 'Use the uploaded image', reply: 'هحط الصورة في الشريحة.' };
     if (u.HAS_IMAGE) return { action: 'answer', targets: [], files: [], instruction: '', reply: 'شايف السكرين شوت: فيها شريحة عنوانها كبير.' };
     if (/ليه|معلق|واقف|بطيء/.test(m)) return { action: 'answer', targets: [], instruction: '', reply: u.STATE?.lastError ? `وقفت عند ${u.STATE.done} من ${u.STATE.total} بسبب: ${u.STATE.lastError}. اكتب كمّل.` : `خلصت ${u.STATE?.done ?? 0} من ${u.STATE?.total ?? 0}.` };
     if (/ترقيم|روماني|دبل|سطور|فانكوفر|Vancouver|الفهرس|حواشي/i.test(m)) return { action: 'restyle', targets: [], instruction: m, reply: 'تمام، هظبط التنسيق.' };

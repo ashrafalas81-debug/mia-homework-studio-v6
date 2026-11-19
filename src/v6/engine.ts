@@ -278,6 +278,19 @@ export function undo(ctx: Ctx) {
   ctx.say(`رجّعت النسخة اللي قبل: ${last.label} ↩️`, 'success');
 }
 
+/** Puts the student's own picture on the slide(s) they asked about. */
+function placeImage(ctx: Ctx, idx: number[], image: string) {
+  ctx.update(q => idx.forEach(i => {
+    const s = q.slides![i];
+    if (!s?.data || s.custom) return;
+    const keep = ['image_points', 'image_full', 'cover'].includes(s.data.layout);
+    s.data = { ...s.data, userImage: image, layout: keep ? s.data.layout : s.data.items.length >= 2 ? 'image_points' : 'image_full' };
+    s.plan.layout = s.data.layout;
+  }));
+  void redraw(ctx, idx);
+  ctx.say(`حطّيت صورتك في الشريحة ${idx.map(i => i + 1).join('، ')} 🖼️ (تقدر تشيلها من ✏️ تعديل النص)`, 'success');
+}
+
 /** Cover / title page edits from chat, applied for real and reported honestly. */
 async function editCover(ctx: Ctx, message: string, instruction: string) {
   const p = ctx.get();
@@ -357,6 +370,7 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
       ctx.update(q => q.slides!.splice(after, 0, { plan: { title: plan.instruction.slice(0, 60), layout: 'cards', keyMessage: plan.instruction, content: plan.instruction, custom: false }, html: '', notes: '', status: 'waiting' }));
       ctx.progress('بصمم الشريحة الجديدة…');
       await fillBatch(ctx, [after], 'Create this new slide. Choose the best layout for it: ' + plan.instruction);
+      if (image) placeImage(ctx, [after], image);
       await redraw(ctx);
     } else {
       const words = Math.round((ctx.get().outline!.reduce((n, o) => n + o.words, 0) / ctx.get().outline!.length));
@@ -442,6 +456,7 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
   const errors = deck
     ? await pool([...chunks(list.filter(i => !ctx.get().slides![i].custom), 4).map(b => () => fillBatch(ctx, b, plan.instruction)), ...list.filter(i => ctx.get().slides![i].custom).map(i => () => designBatch(ctx, [i], plan.instruction))], 4, async job => { await job(); ctx.progress(`بعدّل… ${(done = Math.min(list.length, done + 1))}/${list.length}`); })
     : await pool(list, 4, async i => { await writeSection(ctx, i, distribute(ctx.get().sources, ctx.get().outline!.length)[i], plan.instruction); ctx.progress(`بعدّل… ${++done}/${list.length}`); });
+  if (deck && image && !errors.length) placeImage(ctx, [list[0]], image);
   ctx.progress('');
   if (errors.length) ctx.say(`اتعدّل ${list.length - errors.length} من ${list.length}. الباقي وقف: ${(errors[0] as Error).message}`, 'error');
   else ctx.say(`اتعدّل ✅ ${deck ? 'شريحة' : 'جزء'} ${list.map(i => i + 1).join('، ')}. (اكتب "تراجع" لو عاوز النسخة القديمة)`, 'success');

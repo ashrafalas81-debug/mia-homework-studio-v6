@@ -25,6 +25,8 @@ export type SlideData = {
   quote: string;
   author: string;
   imageQuery: string;
+  /** A picture the student uploaded (data URL). Shown instead of a searched image. */
+  userImage?: string;
   source: string;
 };
 
@@ -106,7 +108,9 @@ function foot(d: SlideData, c: Ctx) {
   return `<div class="foot"><span class="src">${d.source ? esc(d.source) : ''}</span>${c.showNumbers ? `<span class="num" dir="ltr">${c.n} / ${c.total}</span>` : ''}</div>`;
 }
 const wrap = (cls: string, css: string, inner: string) => `<style>${BASE}${css}</style><section class="slide t ${cls}">${inner}</section>`;
-const img = (q: string, w: number, h: number, radius = 24, extra = '') => q
+const img = (q: string, w: number, h: number, radius = 24, extra = '', user?: string) => user && /^data:image\/(jpeg|png|webp);base64,/.test(user)
+  ? `<img src="${user}" alt="" style="width:${w}px;height:${h}px;border-radius:${radius}px;object-fit:contain;background:#fff;${extra}">`
+  : q
   ? `<img data-q="${esc(q)}" alt="" style="width:${w}px;height:${h}px;border-radius:${radius}px;${extra}">`
   : `<div class="imgph" style="width:${w}px;height:${h}px;border-radius:${radius}px;display:grid;place-items:center;${extra}">${icon('heart-pulse', 96, 'color-mix(in srgb,var(--text) 55%,transparent)')}</div>`;
 
@@ -134,7 +138,7 @@ const R: Record<Layout, (d: SlideData, c: Ctx) => string> = {
 ${c.rtl ? '.cv .r img,.cv .r .imgph{border-radius:28px 220px 28px 28px!important;inset:44px 0 44px 44px}' : ''}`,
       `<svg class="ring" width="520" height="520" viewBox="0 0 520 520"><circle cx="260" cy="260" r="230" fill="none" stroke="var(--accent2)" stroke-width="2" stroke-dasharray="4 12"/><circle cx="260" cy="260" r="170" fill="none" stroke="var(--accent)" stroke-width="2" opacity=".6"/></svg>
 <div class="l"><div class="tag">${esc(d.label || 'Medical Intelligence Academy')}</div><h1 class="clamp4" style="font-size:${ts}px">${esc(d.title)}</h1>${d.subtitle ? `<p class="s clamp3" style="font-size:${fit(d.subtitle, 26, 70, 20, c.bs)}px">${esc(d.subtitle)}</p>` : ''}${meta.length ? `<div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('')}</div>` : ''}</div>
-<div class="r">${img(d.imageQuery, 456, 632, 28)}</div><div class="brand"><b>MIA</b>Medical Intelligence Academy</div>`);
+<div class="r">${img(d.imageQuery, 456, 632, 28, '', d.userImage)}</div><div class="brand"><b>MIA</b>Medical Intelligence Academy</div>`);
   },
 
   agenda(d, c) {
@@ -275,7 +279,7 @@ ${c.rtl ? '.cv .r img,.cv .r .imgph{border-radius:28px 220px 28px 28px!important
 .ip li{display:flex;gap:16px;align-items:flex-start;padding:18px 20px}
 .ip .x{font-family:var(--hfont);font-weight:700;margin-bottom:4px}.ip .y{color:var(--muted);line-height:1.4}
 .ip .foot{inset-inline-start:560px}`,
-      `<div class="ph">${img(d.imageQuery, 520, 720, 0)}</div><div class="m">${head(d, c)}<div class="body"><ul>${it.map(i => `<li class="card"><div class="ib" style="width:46px;height:46px;border-radius:13px">${icon(i.icon, 23)}</div><div><div class="x clamp1" style="font-size:${tfs}px">${esc(i.title)}</div><div class="y clamp2" style="font-size:${bfs}px">${esc(i.text)}</div></div></li>`).join('')}</ul></div></div>${foot(d, c)}`);
+      `<div class="ph">${img(d.imageQuery, 520, 720, 0, '', d.userImage)}</div><div class="m">${head(d, c)}<div class="body"><ul>${it.map(i => `<li class="card"><div class="ib" style="width:46px;height:46px;border-radius:13px">${icon(i.icon, 23)}</div><div><div class="x clamp1" style="font-size:${tfs}px">${esc(i.title)}</div><div class="y clamp2" style="font-size:${bfs}px">${esc(i.text)}</div></div></li>`).join('')}</ul></div></div>${foot(d, c)}`);
   },
 
   image_full(d, c) {
@@ -285,7 +289,7 @@ ${c.rtl ? '.cv .r img,.cv .r .imgph{border-radius:28px 220px 28px 28px!important
 .if .tx{position:relative;padding:0 80px 76px;max-width:1040px}
 .if h2{color:#fff}.if .cap{color:rgba(255,255,255,.86);line-height:1.45;margin-top:14px}
 .if .kicker{margin-bottom:18px}.if .foot{color:rgba(255,255,255,.7)}`,
-      `<div class="bg">${img(d.imageQuery, 1280, 720, 0)}</div><div class="ov"></div><div class="tx"><div class="kicker"></div><h2 class="clamp2" style="font-size:${fit(d.title, 54, 34, 36, c.ts)}px">${esc(d.title)}</h2>${d.subtitle ? `<p class="cap clamp3" style="font-size:${fit(d.subtitle, 24, 120, 18, c.bs)}px">${esc(d.subtitle)}</p>` : ''}</div>${foot(d, c)}`);
+      `<div class="bg">${img(d.imageQuery, 1280, 720, 0, '', d.userImage)}</div><div class="ov"></div><div class="tx"><div class="kicker"></div><h2 class="clamp2" style="font-size:${fit(d.title, 54, 34, 36, c.ts)}px">${esc(d.title)}</h2>${d.subtitle ? `<p class="cap clamp3" style="font-size:${fit(d.subtitle, 24, 120, 18, c.bs)}px">${esc(d.subtitle)}</p>` : ''}</div>${foot(d, c)}`);
   },
 
   quote(d, c) {

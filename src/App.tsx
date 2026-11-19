@@ -658,6 +658,7 @@ function TextSheet({ p, i, close, act }: { p: V6Project; i: number; close: () =>
         <label className="lbl">الجدول (كل سطر صف، والأعمدة بينها |)</label>
         <textarea rows={6} dir="auto" value={[d.headers.join(' | '), ...d.rows.map(r => r.join(' | '))].join('\n')} onChange={e => { const lines = e.target.value.split('\n'); up({ headers: (lines[0] || '').split('|').map(x => x.trim()), rows: lines.slice(1).map(l => l.split('|').map(x => x.trim())) }); }} />
       </>}
+      {d.userImage && <div className="item-ed"><img src={d.userImage} alt="" style={{ maxHeight: 120, objectFit: 'contain' }} /><button className="ghost" onClick={() => up({ userImage: undefined })}>🗑 شيل الصورة دي</button></div>}
       <label className="lbl">المصدر أسفل الشريحة</label>
       <input dir="auto" value={d.source} onChange={e => up({ source: e.target.value })} />
       {p.dk?.notes && <><label className="lbl">🎤 ملاحظات المتحدث</label><textarea rows={4} dir="auto" value={notes} onChange={e => setNotes(e.target.value)} /></>}
