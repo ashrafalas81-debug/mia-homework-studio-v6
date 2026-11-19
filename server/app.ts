@@ -72,6 +72,7 @@ app.use('/api/*', async (c, next) => {
 
 app.post('/api/vision', async c => {
   const b=z.object({image:z.string().max(1900000).regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/),name:z.string().max(250)}).strict().parse(await c.req.json());
+  if((c.env as any).MIA_MOCK_AI==='true')return c.json({data:{text:'Mock text read from '+b.name+': Rotator cuff lecture notes — supraspinatus, infraspinatus.',description:'A lecture slide about the rotator cuff.',uncertainties:[],kind:'presentation',palette:[],structure:[],styleNotes:''}});
   const schema=z.object({
     text:z.string().max(16000), description:z.string().max(5000), uncertainties:z.array(z.string().max(500)).max(10),
     kind:z.enum(['presentation','assignment','homework','report','exam','instructions','figure','other']),

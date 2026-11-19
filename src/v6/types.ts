@@ -37,7 +37,7 @@ export type SlideState = { plan: SlidePlan; data?: SlideData; custom?: boolean; 
 
 export type Cover = { student: string; university: string; faculty: string; course: string; professor: string; date: string };
 
-export type Msg = { id: string; role: 'user' | 'assistant'; content: string; at: string; tone?: 'progress' | 'error' | 'success' };
+export type Msg = { id: string; role: 'user' | 'assistant'; content: string; at: string; tone?: 'progress' | 'error' | 'success'; files?: string[]; attachments?: string[] };
 
 export type V6Project = {
   id: string;
@@ -64,6 +64,7 @@ export type V6Project = {
   docStyle?: import('./docDesign').DocStyle;
   docFormat?: import('./docDesign').DocFormat;
   lastError?: string;
+  coverStyle?: { nameScale: number; titleScale: number };
   coverInfo?: CoverInfo;
   // undo
   history?: { label: string; sections?: (AcademicSection | null)[]; slides?: SlideState[]; style?: DeckStyle; coverInfo?: CoverInfo }[];

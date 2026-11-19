@@ -42,6 +42,9 @@ export function mockAI(_schema: unknown, system: string, user: string): any {
   if (/route a student's chat message/.test(system)) {
     const m: string = u.MESSAGE;
     const num = Number((m.match(/\d+/) || [])[0]);
+    if (/الكفر|الغلاف|الكافر/.test(m)) return { action: 'cover', targets: [], files: [], instruction: m, reply: 'هعدّل الغلاف.' };
+    if (/ابعت|فين الملف|نزّله|نزله|عاوز الملف/.test(m)) return { action: 'send_files', targets: [], files: u.AVAILABLE_FILES, instruction: '', reply: 'الملفات تحت، دوس على الزرار.' };
+    if (u.HAS_IMAGE) return { action: 'answer', targets: [], files: [], instruction: '', reply: 'شايف السكرين شوت: فيها شريحة عنوانها كبير.' };
     if (/ليه|معلق|واقف|بطيء/.test(m)) return { action: 'answer', targets: [], instruction: '', reply: u.STATE?.lastError ? `وقفت عند ${u.STATE.done} من ${u.STATE.total} بسبب: ${u.STATE.lastError}. اكتب كمّل.` : `خلصت ${u.STATE?.done ?? 0} من ${u.STATE?.total ?? 0}.` };
     if (/ترقيم|روماني|دبل|سطور|فانكوفر|Vancouver|الفهرس|حواشي/i.test(m)) return { action: 'restyle', targets: [], instruction: m, reply: 'تمام، هظبط التنسيق.' };
     if (/احذف|امسح|شيل/.test(m)) return { action: 'remove', targets: num ? [num] : [], instruction: 'remove', reply: 'تمام، هشيلها.' };
@@ -71,6 +74,11 @@ export function mockAI(_schema: unknown, system: string, user: string): any {
         imageQuery: ['cover', 'image_points', 'image_full'].includes(s.layout) ? 'rotator cuff' : '', source: k % 3 === 0 ? 'Source: Smith 2023' : '', notes: 'Speaker notes for ' + s.title,
       })),
     };
+  }
+  if (/request about the COVER/.test(system)) {
+    const r = u.REQUEST as string;
+    const name = (r.match(/اسمي ([^،,]+)/) || [])[1] || '';
+    return { title: '', subtitle: '', student: name.trim(), university: '', faculty: '', course: '', professor: '', date: '', nameSize: /كبر|كبّر/.test(r) ? 'large' : '', titleSize: '', unsupported: /لوجو|logo/i.test(r) ? 'إضافة لوجو' : '' };
   }
   if (/Map the student's formatting request/.test(system)) {
     const r = u.REQUEST as string;

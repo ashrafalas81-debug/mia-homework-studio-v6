@@ -28,7 +28,7 @@ export type SlideData = {
   source: string;
 };
 
-export type DeckStyle = { titleScale: number; bodyScale: number; headingFont: string; bodyFont: string; palette: string; showNumbers: boolean };
+export type DeckStyle = { titleScale: number; bodyScale: number; headingFont: string; bodyFont: string; palette: string; showNumbers: boolean; coverNameScale?: number; coverTitleScale?: number };
 export type CoverInfo = { presenter: string; institution: string; date: string };
 
 export const DEFAULT_STYLE: DeckStyle = { titleScale: 1, bodyScale: 1, headingFont: '', bodyFont: '', palette: '', showNumbers: true };
@@ -96,7 +96,7 @@ const BASE = `
 .t img[data-missing],.t .imgph{background:radial-gradient(circle at 30% 30%,color-mix(in srgb,var(--accent2) 45%,var(--surface)),color-mix(in srgb,var(--accent) 35%,var(--bg)))}
 `;
 
-type Ctx = { n: number; total: number; ts: number; bs: number; rtl: boolean; cover: CoverInfo; deckTitle: string; showNumbers: boolean };
+type Ctx = { n: number; total: number; ts: number; bs: number; rtl: boolean; cover: CoverInfo; deckTitle: string; showNumbers: boolean; cn: number; ct: number };
 
 function head(d: SlideData, c: Ctx, opts: { center?: boolean } = {}) {
   const ts = fit(d.title, 46, 34, 30, c.ts);
@@ -114,7 +114,7 @@ const img = (q: string, w: number, h: number, radius = 24, extra = '') => q
 
 const R: Record<Layout, (d: SlideData, c: Ctx) => string> = {
   cover(d, c) {
-    const ts = fit(d.title, 74, 34, 46, c.ts);
+    const ts = fit(d.title, 74, 34, 46, c.ts * c.ct);
     const meta = [c.cover.presenter, c.cover.institution, c.cover.date].filter(Boolean);
     return wrap('cv', `
 .cv{padding:0;flex-direction:row;background:linear-gradient(135deg,var(--bg) 0%,color-mix(in srgb,var(--accent) 16%,var(--bg)) 100%)}
@@ -123,7 +123,8 @@ const R: Record<Layout, (d: SlideData, c: Ctx) => string> = {
 .cv .tag:before{content:'';width:38px;height:4px;border-radius:2px;background:var(--accent)}
 .cv h1{font-family:var(--hfont);font-weight:800;line-height:1.05;letter-spacing:-1.5px;margin:0 0 22px;color:var(--text)}
 .cv .s{color:var(--muted);line-height:1.4;margin:0;max-width:620px}
-.cv .meta{margin-top:44px;display:flex;flex-direction:column;gap:6px;font-size:${Math.round(19 * c.bs)}px;color:var(--text)}
+.cv .meta{margin-top:44px;display:flex;flex-direction:column;gap:6px;font-size:${Math.round(19 * c.bs * c.cn)}px;color:var(--text)}
+.cv .meta span:first-child{font-weight:700}
 .cv .meta span+span{color:var(--muted)}
 .cv .r{width:500px;position:relative;flex:none}
 .cv .r img,.cv .r .imgph{position:absolute;inset:44px 44px 44px 0;width:auto!important;height:auto!important;border-radius:220px 28px 28px 28px!important}
@@ -340,7 +341,7 @@ ${c.rtl ? '.cv .r img,.cv .r .imgph{border-radius:28px 220px 28px 28px!important
     return wrap('cl', `.cl{justify-content:center;align-items:center;text-align:center;background:radial-gradient(circle at 50% 120%,color-mix(in srgb,var(--accent) 40%,var(--bg)),var(--bg) 70%)}
 .cl h2{font-size:${fit(d.title, 84, 20, 52, c.ts)}px;letter-spacing:-2px}
 .cl .sub{margin-top:18px;max-width:900px}
-.cl .meta{margin-top:40px;display:flex;gap:16px;justify-content:center;font-size:${Math.round(19 * c.bs)}px;color:var(--muted)}
+.cl .meta{margin-top:40px;display:flex;gap:16px;justify-content:center;font-size:${Math.round(19 * c.bs * c.cn)}px;color:var(--muted)}
 .cl .brand{position:absolute;bottom:40px;left:0;right:0;display:flex;gap:10px;justify-content:center;align-items:center;font-weight:700;font-size:15px;color:var(--muted)}
 .cl .brand b{background:var(--accent);color:var(--bg);border-radius:8px;padding:3px 8px;font-family:var(--hfont)}`,
       `<div class="kicker"></div><h2 class="clamp2">${esc(d.title)}</h2>${d.subtitle ? `<p class="sub clamp2" style="font-size:${Math.round(24 * c.bs)}px">${esc(d.subtitle)}</p>` : ''}${meta.length ? `<div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('<span>·</span>')}</div>` : ''}<div class="brand"><b>MIA</b>Medical Intelligence Academy</div>`);
@@ -368,5 +369,5 @@ export function normalize(d: Partial<SlideData>): SlideData {
 
 export function renderTemplate(d: SlideData, n: number, total: number, style: DeckStyle, rtl: boolean, cover: CoverInfo, deckTitle = '') {
   const data = normalize(d);
-  return R[data.layout](data, { n, total, ts: style.titleScale, bs: style.bodyScale, rtl, cover, deckTitle, showNumbers: style.showNumbers });
+  return R[data.layout](data, { n, total, ts: style.titleScale, bs: style.bodyScale, rtl, cover, deckTitle, showNumbers: style.showNumbers, cn: style.coverNameScale || 1, ct: style.coverTitleScale || 1 });
 }

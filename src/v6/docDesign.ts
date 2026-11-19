@@ -265,7 +265,8 @@ function coverPage(p: V6Project, t: T, rtl: boolean, image: string | null) {
   const info = (['student', 'university', 'faculty', 'course', 'professor'] as const).filter(k => c[k]?.trim()).map(k => `<div><small>${L[k]}</small><b>${esc(c[k])}</b></div>`);
   info.push(`<div><small>${L.date}</small><b>${esc(c.date || new Date().toLocaleDateString(rtl ? 'ar-EG' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' }))}</b></div>`);
   const dark = t.cover !== '#F3F7FF';
-  const titleSize = Math.max(30, Math.min(44, Math.round(44 * Math.sqrt(60 / Math.max(60, p.title.length)))));
+  const cs = p.coverStyle || { nameScale: 1, titleScale: 1 };
+  const titleSize = Math.round(Math.max(30, Math.min(44, Math.round(44 * Math.sqrt(60 / Math.max(60, p.title.length))))) * cs.titleScale);
   return `<style>
 .cv{position:absolute;inset:0;background:${t.cover};color:${t.coverInk}}
 .cv .top{position:absolute;top:0;left:0;right:0;height:520px;overflow:hidden}
@@ -279,8 +280,8 @@ function coverPage(p: V6Project, t: T, rtl: boolean, image: string | null) {
 .cv .kind:before{content:'';width:40px;height:3px;background:currentColor;border-radius:2px}
 .cv h1{font-family:var(--h);font-weight:800;font-size:${titleSize}px;line-height:1.15;margin:18px 0 0;letter-spacing:-.5px}
 .cv .grid{position:absolute;left:${M.side}px;right:${M.side}px;bottom:76px;display:grid;grid-template-columns:1fr 1fr;gap:18px 40px;padding-top:26px;border-top:1px solid ${dark ? '#ffffff2e' : '#0000001f'}}
-.cv .grid small{display:block;font-size:11px;letter-spacing:1.4px;text-transform:uppercase;opacity:.7;margin-bottom:4px;font-weight:700}
-.cv .grid b{font-size:15px;font-weight:700}
+.cv .grid small{display:block;font-size:${Math.round(11 * Math.min(1.4, cs.nameScale))}px;letter-spacing:1.4px;text-transform:uppercase;opacity:.7;margin-bottom:4px;font-weight:700}
+.cv .grid b{font-size:${Math.round(15 * cs.nameScale)}px;font-weight:700;line-height:1.3}
 </style><div class="cv"><div class="top">${image ? `<img src="${image}" alt=""><div class="shade"></div>` : `<svg class="pattern" width="${PW}" height="520" viewBox="0 0 ${PW} 520"><circle cx="${rtl ? 120 : 660}" cy="150" r="250" fill="${t.accent}" opacity=".22"/><circle cx="${rtl ? 220 : 560}" cy="250" r="160" fill="none" stroke="${t.accent2}" stroke-width="2" opacity=".6"/><circle cx="${rtl ? 220 : 560}" cy="250" r="210" fill="none" stroke="${t.coverInk}" stroke-width="1" stroke-dasharray="4 10" opacity=".35"/>${icon(p.kind === 'lab' ? 'microscope' : 'book-open', 120, t.coverInk).replace('<svg ', `<svg x="${rtl ? 160 : 500}" y="190" opacity=".85" `)}</svg><div class="shade"></div>`}</div>
 <div class="brand"><b>MIA</b>Medical Intelligence Academy</div>
 <div class="main"><div class="kind">${kind}</div><h1>${esc(p.title)}</h1></div>

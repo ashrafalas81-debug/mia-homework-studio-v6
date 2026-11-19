@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AcademicSection } from '../shared/model';
 import { cited } from '../shared/model';
-import { extract } from './files';
 import { download, filename } from './files';
 import { deleteProject, listProjects, saveProject } from './v6/db';
 import { researchPdf, researchWord } from './v6/docExport';
 import { applyStyle, handleMessage, redraw, referenceList, runDeck, runResearch, themeOf, wordsIn, type Ctx } from './v6/engine';
 import { DEFAULT_STYLE, FONT_PAIRS, PALETTES, type SlideData } from './v6/templates';
+import { readFile, type ReadResult } from './v6/readFile';
+import { exportFile, FILE_LABELS } from './v6/exportFile';
 import { DEFAULT_DOC_STYLE, DEFAULT_FORMAT, DOC_THEMES, parts, sectionLabel, type DocFormat, type DocStyle, type DocTheme } from './v6/docDesign';
 import { exportDeckPdf, exportPptx, slideDocument, W, H } from './v6/slides';
 import type { DeckOptions, Kind, Msg, ResearchOptions, V6Project } from './v6/types';
@@ -52,7 +53,7 @@ export default function App() {
   const ctxFor = useCallback((id: string, signal: AbortSignal): Ctx => ({
     get: () => store.map.get(id)!,
     update: fn => store.update(id, fn),
-    say: (content, tone) => store.update(id, p => { p.messages = [...p.messages, { id: uid(), role: 'assistant', content, at: now(), tone }]; }),
+    say: (content, tone, files) => store.update(id, p => { p.messages = [...p.messages, { id: uid(), role: 'assistant', content, at: now(), tone, ...(files?.length ? { files } : {}) }]; }),
     progress: text => store.update(id, p => { p.progress = text; }),
     signal,
   }), [store]);
@@ -91,9 +92,9 @@ export default function App() {
       {project && <Workspace key={project.id} p={project} back={() => setView({ name: 'home' })}
         busy={project.status === 'working'}
         stop={() => jobs.current.get(project.id)?.abort()}
-        send={(text, selected) => {
-          store.update(project.id, p => { p.messages = [...p.messages, { id: uid(), role: 'user', content: text, at: now() }]; });
-          run(project.id, ctx => handleMessage(ctx, text, selected));
+        send={(text, selected, attachments) => {
+          store.update(project.id, p => { p.messages = [...p.messages, { id: uid(), role: 'user', content: text, at: now(), ...(attachments.length ? { attachments: attachments.map(a => a.name) } : {}) }]; });
+          run(project.id, ctx => handleMessage(ctx, text, selected, attachments));
         }}
         act={job => run(project.id, job)}
         toDeck={() => setView({ name: 'form', kind: 'deck' })} />}
@@ -171,7 +172,7 @@ function useUpload() {
     for (const f of [...(files || [])]) {
       setState(s => [...s, { name: f.name, text: '', busy: 'بقرا الملف…' }]);
       try {
-        const a = await extract(f, 'instructions', true, msg => setState(s => s.map(x => x.name === f.name ? { ...x, busy: msg } : x)), new AbortController().signal);
+        const a = await readFile(f, msg => setState(s => s.map(x => x.name === f.name ? { ...x, busy: msg } : x)));
         setState(s => s.map(x => x.name === f.name ? { ...x, text: a.text, busy: '' } : x));
       } catch (e) {
         setState(s => s.filter(x => x.name !== f.name));
@@ -351,7 +352,7 @@ function DeckForm({ back, start, research }: { back: () => void; start: (p: V6Pr
 
 /* ═════════════════════════ Workspace ═════════════════════════ */
 
-function Workspace({ p, back, send, busy, stop, toDeck, act }: { p: V6Project; back: () => void; send: (t: string, selected: number | null) => void; busy: boolean; stop: () => void; toDeck: () => void; act: (job: (ctx: Ctx) => Promise<void>) => void }) {
+function Workspace({ p, back, send, busy, stop, toDeck, act }: { p: V6Project; back: () => void; send: (t: string, selected: number | null, attachments: ReadResult[]) => void; busy: boolean; stop: () => void; toDeck: () => void; act: (job: (ctx: Ctx) => Promise<void>) => void }) {
   const [tab, setTab] = useState<'file' | 'chat'>('file');
   const [sheet, setSheet] = useState<'' | 'style' | 'text'>('');
   const [selected, setSelected] = useState<number | null>(null);
@@ -362,7 +363,7 @@ function Workspace({ p, back, send, busy, stop, toDeck, act }: { p: V6Project; b
     lastCount.current = p.messages.length;
   }, [p.messages.length, tab]);
   const deck = p.kind === 'deck';
-  const submit = (t: string) => { send(t, selected); setTab('chat'); setUnread(0); };
+  const submit = (t: string, att: ReadResult[]) => { send(t, selected, att); setTab('chat'); setUnread(0); };
   return (
     <div className="ws">
       <header className="ws-bar">
@@ -413,13 +414,8 @@ function Downloads({ p, busy }: { p: V6Project; busy: boolean }) {
   const name = filename(p.title);
   const act = async (kind: string) => {
     setOpen(false);
-    try {
-      if (kind === 'premium') { const { buildPremiumPdf } = await import('./v6/docDesign'); const r = await buildPremiumPdf(p, p.docStyle || DEFAULT_DOC_STYLE, setWork); download(r.blob, name + '.pdf'); toast(`PDF جاهز: ${r.pages} صفحة${p.ro && r.pages !== p.ro.pages ? ` (طلبت ${p.ro.pages})` : ''}`); }
-      if (kind === 'pdf' && !deck) { setWork('بجهز PDF…'); const r = await researchPdf(p); download(r.blob, name + '-classic.pdf'); toast(`PDF كلاسيكي جاهز: ${r.pages} صفحة`); }
-      if (kind === 'word') { setWork('بجهز Word…'); download(await researchWord(p), name + '.docx'); toast('ملف Word جاهز'); }
-      if (kind === 'pptx') { const b = await exportPptx(p.title, p.slides!, themeOf(p), p.dk!.language === 'Arabic', i => setWork(`بجهز الشريحة ${i}…`)); download(b, name + '.pptx'); toast('ملف PowerPoint جاهز'); }
-      if (kind === 'pdf' && deck) { const b = await exportDeckPdf(p.slides!, themeOf(p), p.dk!.language === 'Arabic', i => setWork(`بجهز الشريحة ${i}…`)); download(b, name + '.pdf'); toast('PDF العرض جاهز'); }
-    } catch (e) { alert((e as Error).message); }
+    const map: Record<string, string> = { premium: 'premium_pdf', pdf: deck ? 'deck_pdf' : 'classic_pdf', word: 'word', pptx: 'pptx' };
+    try { toast(await exportFile(p, map[kind] || kind, setWork)); } catch (e) { alert((e as Error).message); }
     setWork('');
   };
   if (!ready) return <span className="dl-wait">{busy ? '⏳' : ''}</span>;
@@ -606,6 +602,8 @@ function StyleSheet({ p, close, act }: { p: V6Project; close: () => void; act: (
         <input value={cv.institution} placeholder="الجامعة / الكلية" onChange={e => setCv(x => ({ ...x, institution: e.target.value }))} />
         <input value={cv.date} placeholder="التاريخ" onChange={e => setCv(x => ({ ...x, date: e.target.value }))} />
       </div>
+      <h4>حجم الأسماء في الغلاف</h4>
+      <Chips value={st.coverNameScale || 1} onChange={v => setStyle({ coverNameScale: v }, 'حجم الأسماء')} options={[[1, 'عادي'], [1.3, 'كبير'], [1.6, 'كبير جدًا']]} />
       <button className="primary wide-btn" onClick={() => apply(q => {
         q.title = cv.title || q.title;
         q.coverInfo = { presenter: cv.presenter, institution: cv.institution, date: cv.date };
@@ -673,16 +671,18 @@ function DocStyleSheet({ p, close, act }: { p: V6Project; close: () => void; act
   const [fm, setFm] = useState<DocFormat>({ ...DEFAULT_FORMAT, ...(p.docFormat || {}) });
   const [cs, setCs] = useState(p.ro?.citationStyle || 'APA');
   const set = <K extends keyof DocFormat>(k: K, v: DocFormat[K]) => setFm(x => ({ ...x, [k]: v }));
+  const [cov, setCov] = useState({ title: p.title, ...p.cover });
+  const [cs2, setCs2] = useState(p.coverStyle || { nameScale: 1, titleScale: 1 });
 
   const [prev, setPrev] = useState<{ images: string[]; total: number } | null>(null);
   const [busy, setBusy] = useState(true);
   useEffect(() => {
     let live = true;
     setBusy(true);
-    import('./v6/docDesign').then(m => m.previewPages({ ...p, docFormat: fm, ro: p.ro ? { ...p.ro, citationStyle: cs } : p.ro }, st, 3)).then(r => { if (live) { setPrev(r); setBusy(false); } }).catch(() => live && setBusy(false));
+    import('./v6/docDesign').then(m => m.previewPages({ ...p, title: cov.title || p.title, cover: { ...p.cover, ...cov }, coverStyle: cs2, docFormat: fm, ro: p.ro ? { ...p.ro, citationStyle: cs } : p.ro }, st, 3)).then(r => { if (live) { setPrev(r); setBusy(false); } }).catch(() => live && setBusy(false));
     return () => { live = false; };
-  }, [st, fm, cs, p.updatedAt]);
-  const save = () => { act(ctx => applyStyle(ctx, q => { q.docStyle = st; q.docFormat = fm; if (q.ro) q.ro = { ...q.ro, citationStyle: cs }; }, 'شكل الـ PDF')); close(); };
+  }, [st, fm, cs, cov, cs2, p.updatedAt]);
+  const save = () => { act(ctx => applyStyle(ctx, q => { q.docStyle = st; q.docFormat = fm; if (q.ro) q.ro = { ...q.ro, citationStyle: cs }; const { title, ...c } = cov; q.title = title || q.title; q.cover = { ...q.cover, ...c }; q.coverStyle = cs2; }, 'شكل الـ PDF')); close(); };
   return (
     <Sheet title="🎨 شكل الـ PDF" close={close}>
       <h4>الستايل</h4>
@@ -693,6 +693,16 @@ function DocStyleSheet({ p, close, act }: { p: V6Project; close: () => void; act
       })}</div>
       <h4>حجم الخط</h4>
       <Chips value={st.size} onChange={v => setSt(x => ({ ...x, size: v }))} options={[['compact', 'صغير'], ['normal', 'عادي'], ['large', 'كبير']]} />
+      <h4>الغلاف</h4>
+      <div className="grid2">
+        <input dir="auto" value={cov.title} placeholder="عنوان البحث" onChange={e => setCov(x => ({ ...x, title: e.target.value }))} />
+        {([['student', 'اسم الطالب'], ['university', 'الجامعة'], ['faculty', 'الكلية'], ['course', 'المادة'], ['professor', 'اسم الدكتور'], ['date', 'التاريخ']] as const).map(([k, l]) =>
+          <input key={k} dir="auto" placeholder={l} value={(cov as any)[k] || ''} onChange={e => setCov(x => ({ ...x, [k]: e.target.value }))} />)}
+      </div>
+      <h4>حجم الأسماء في الغلاف</h4>
+      <Chips value={cs2.nameScale} onChange={v => setCs2(x => ({ ...x, nameScale: v }))} options={[[1, 'عادي'], [1.3, 'كبير'], [1.6, 'كبير جدًا']]} />
+      <h4>حجم عنوان الغلاف</h4>
+      <Chips value={cs2.titleScale} onChange={v => setCs2(x => ({ ...x, titleScale: v }))} options={[[0.85, 'أصغر'], [1, 'عادي'], [1.15, 'كبير'], [1.3, 'كبير جدًا']]} />
       <h4>ترقيم العناوين</h4>
       <Chips value={fm.numbering} onChange={v => set('numbering', v)} options={[['padded', '01'], ['decimal', '1'], ['roman', 'I'], ['letters', p.ro?.language === 'Arabic' ? 'أ' : 'A'], ['none', 'من غير']]} />
       <h4>المسافة بين السطور</h4>
@@ -772,7 +782,7 @@ function Chat({ p }: { p: V6Project }) {
     <div className="chat">
       {visible.map(m => {
         const fresh = !seen.has(m.id);
-        return <div key={m.id} className={`msg ${m.role} ${m.tone || ''}`}>{m.role === 'assistant' && <span className="avatar">M</span>}<div className="bubble"><Typewriter text={m.content} animate={fresh && m.role === 'assistant'} /></div></div>;
+        return <div key={m.id} className={`msg ${m.role} ${m.tone || ''}`}>{m.role === 'assistant' && <span className="avatar">M</span>}<div className="bubble">{m.attachments?.length ? <div className="att-line">{m.attachments.map(a => <span key={a}>📎 {a}</span>)}</div> : null}<Typewriter text={m.content} animate={fresh && m.role === 'assistant'} />{m.files?.length ? <FileButtons p={p} files={m.files} /> : null}</div></div>;
       })}
       {p.status === 'working' && p.progress && <div className="msg assistant thinking"><span className="avatar">M</span><div className="bubble"><span className="dots"><i /><i /><i /></span>{p.progress}</div></div>}
       <div ref={end} />
@@ -780,10 +790,35 @@ function Chat({ p }: { p: V6Project }) {
   );
 }
 
+function FileButtons({ p, files }: { p: V6Project; files: string[] }) {
+  const [work, setWork] = useState('');
+  return (
+    <div className="file-btns">
+      {files.map(f => <button key={f} disabled={!!work} onClick={async () => { try { toast(await exportFile(p, f, setWork)); } catch (e) { alert((e as Error).message); } setWork(''); }}>{FILE_LABELS[f] || f} ⬇</button>)}
+      {work && <small>{work}</small>}
+    </div>
+  );
+}
+
 /* ─────────── Composer ─────────── */
 
-function Composer({ busy, deck, selected, clear, submit }: { busy: boolean; deck: boolean; selected: number | null; clear: () => void; submit: (t: string) => void }) {
+function Composer({ busy, deck, selected, clear, submit }: { busy: boolean; deck: boolean; selected: number | null; clear: () => void; submit: (t: string, att: ReadResult[]) => void }) {
   const [text, setText] = useState('');
+  const [att, setAtt] = useState<(ReadResult & { busy?: string; key: string })[]>([]);
+  const reading = att.some(a => a.busy);
+  const attach = async (list: FileList | null) => {
+    for (const f of [...(list || [])].slice(0, 4)) {
+      const key = uid();
+      setAtt(a => [...a, { key, name: f.name, text: '', warnings: [], busy: 'بقرا…' }]);
+      try {
+        const r = await readFile(f, msg => setAtt(a => a.map(x => x.key === key ? { ...x, busy: msg } : x)));
+        setAtt(a => a.map(x => x.key === key ? { ...r, key } : x));
+      } catch (e) {
+        setAtt(a => a.filter(x => x.key !== key));
+        alert('مقدرتش أقرا ' + f.name + ': ' + (e as Error).message);
+      }
+    }
+  };
   const ta = useRef<HTMLTextAreaElement>(null);
   const touch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
   useLayoutEffect(() => {
@@ -792,17 +827,25 @@ function Composer({ busy, deck, selected, clear, submit }: { busy: boolean; deck
     el.style.height = Math.min(el.scrollHeight, 168) + 'px';
   }, [text]);
   useEffect(() => { if (selected !== null && !touch) ta.current?.focus(); }, [selected, touch]);
-  const go = () => { const t = text.trim(); if (!t || busy) return; submit(t); setText(''); };
+  const go = () => {
+    const t = text.trim() || (att.length ? (att.some(a => a.image) ? 'بص على الصورة دي' : 'استخدم الملف ده') : '');
+    if (!t || busy || reading) return;
+    submit(t, att.map(({ busy: _b, key: _k, ...r }) => r)); setText(''); setAtt([]);
+  };
   const suggestions = deck ? ['خلّي الألوان أغمق', 'زوّد صور حقيقية', 'الشريحة دي زحمة', 'ضيف شريحة أسئلة في الآخر'] : ['زوّد أمثلة إكلينيكية', 'خلّي الأسلوب أبسط', 'زوّد مراجع أحدث', 'ضيف جزء عن العلاج'];
   return (
     <div className="composer">
       {selected !== null && <div className="target">✏️ هتعدّل: {deck ? 'الشريحة' : 'الجزء'} {selected + 1}<button onClick={clear}>×</button></div>}
       {!text && !busy && <div className="sugg">{suggestions.map(s => <button key={s} onClick={() => { setText(s); ta.current?.focus(); }}>{s}</button>)}</div>}
+      {att.length > 0 && <div className="att-row">{att.map(a => (
+        <span key={a.key} className="att-chip">{a.image ? <img src={a.image} alt="" /> : <b>📄</b>}<span className="att-name">{a.name}{a.busy && <small> {a.busy}</small>}</span><button onClick={() => setAtt(x => x.filter(y => y.key !== a.key))} aria-label="إزالة">×</button></span>
+      ))}</div>}
       <div className="input-row">
-        <textarea ref={ta} rows={1} value={text} dir="auto" placeholder={busy ? 'استنى ثواني، بخلّص الشغل…' : 'اكتب أي تعديل بكلامك العادي…'}
+        <label className="clip" aria-label="إرفاق ملف أو صورة">📎<input type="file" multiple accept="image/*,.pdf,.docx,.pptx,.txt,.md" onChange={e => { attach(e.target.files); e.target.value = ''; }} /></label>
+        <textarea ref={ta} rows={1} value={text} dir="auto" placeholder={busy ? 'استنى ثواني، بخلّص الشغل…' : 'اكتب تعديل، أو ابعت ملف أو سكرين شوت 📎'}
           onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !touch && !e.nativeEvent.isComposing) { e.preventDefault(); go(); } }} />
-        <button className="send" disabled={!text.trim() || busy} onClick={go} aria-label="إرسال">↑</button>
+        <button className="send" disabled={(!text.trim() && !att.length) || busy || reading} onClick={go} aria-label="إرسال">↑</button>
       </div>
       {!touch && <div className="kbd-hint">Enter للإرسال · Shift + Enter لسطر جديد</div>}
     </div>

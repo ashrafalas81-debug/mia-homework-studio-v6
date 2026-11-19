@@ -22,10 +22,10 @@ const SAFETY = `You are MIA, a senior medical-education writer and designer for 
 
 const words = (n: number) => Math.max(120, Math.min(2200, Math.round(n)));
 
-async function ai<T>(c: any, schema: z.ZodType<T>, system: string, user: string, tokens: number, role: 'fast' | 'writer' | 'designer', effort: 'low' | 'medium' | 'high' = 'low'): Promise<T> {
+async function ai<T>(c: any, schema: z.ZodType<T>, system: string, user: string, tokens: number, role: 'fast' | 'writer' | 'designer', effort: 'low' | 'medium' | 'high' = 'low', image?: string): Promise<T> {
   const env = c.env as Env;
   if (env.MIA_MOCK_AI === 'true') return mockAI(schema, system, user) as T;
-  const r = await route(env, schema, SAFETY + '\n\n' + system, user, tokens, true, c.get('userId'), c.req.raw.signal, fetch, true, undefined, { role, effort });
+  const r = await route(env, schema, SAFETY + '\n\n' + system, user, tokens, true, c.get('userId'), c.req.raw.signal, fetch, true, image, { role, effort });
   return (r as any).data as T;
 }
 
@@ -179,12 +179,16 @@ const EditReq = z.object({
   history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(1500) }).strict()).max(16),
   selected: z.number().int().nullable(),
   state: z.object({ status: z.string().max(20), progress: z.string().max(200), lastError: z.string().max(400), done: z.number().int(), total: z.number().int() }).strict().optional(),
+  attachments: z.array(z.object({ name: z.string().max(250), text: z.string().max(12000) }).strict()).max(4).optional(),
+  image: z.string().max(1900000).regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/).optional(),
+  files: z.array(z.string().max(40)).max(6).optional(),
 }).strict();
 
 export const EditPlan = z.object({
-  action: z.enum(['revise', 'add', 'remove', 'restyle', 'more_sources', 'answer']),
+  action: z.enum(['revise', 'add', 'remove', 'restyle', 'cover', 'send_files', 'more_sources', 'answer']),
   targets: z.array(z.number().int()),
   instruction: z.string(),
+  files: z.array(z.string()),
   reply: z.string(),
 }).strict();
 
@@ -198,13 +202,18 @@ v6.post('/edit/understand', async c => {
 - add: add a new ${unit}; targets = [position after which to insert] (0 = start, last number = end); instruction describes the new ${unit}.
 - remove: targets = ${unit}s to delete.
 - restyle: ${b.kind === 'deck' ? 'visual change to the WHOLE deck with no specific slide named: colours, theme, darker/lighter, font family, bigger/smaller titles or text ("كبّر العناوين", "صغّر الكلام", "خليه أغمق", "غيّر الخط"), slide numbers' : 'FORMAT change to the whole document: heading numbering (1, 01, I, أ, none), line spacing (1.5, double), margins, page-number position or hiding, contents page on/off, abstract on/off, header text, citation style (APA/Vancouver/Harvard), font size, PDF style'}; targets = []. If a specific slide is named or SELECTED for a size change, use revise instead.
+- cover: anything about the cover / title page (الغلاف / الكفر / صفحة العنوان): change the title, subtitle, student/presenter name, university, faculty, course, professor, date, or make the names/title bigger or smaller ("كبّر الأسماء في الكفر"). targets = []; instruction = the exact change incl. new text.
+- send_files: the student wants the finished file itself ("ابعتلي الملف", "فين الملف", "نزّله", "عاوز الـ PDF"). files = the formats they want from AVAILABLE_FILES (all of them if unclear). The app will show download buttons under your reply; reply tells them to tap the button.
 - more_sources: student wants more or newer references; targets = [].
 - answer: a question or chat that needs no change; reply answers it. If the student asks about the tool itself (why it is slow/stuck/stopped, what happened, is it done), answer ONLY from STATE: say honestly what is done (done/total), what is running (progress) and the last error in simple Egyptian Arabic; if something stopped, tell them to write "كمّل". Never invent technical causes not in STATE. You cannot see or fix the program's code.
 If SELECTED is not null and the message says "ده/دي/this" without a number, target SELECTED.
+The student can attach files and screenshots. ATTACHMENTS = text extracted from their files; an attached image is a screenshot or photo. Use them: if a screenshot shows a problem in their document/slides, say briefly what you see and pick the action that fixes it; if an attachment holds content they want added or used, include that content (quoted, condensed) in instruction. If the image is unrelated or unclear, answer and ask one short question.
+NEVER claim a change is already done: the app applies changes and reports the real result. Your reply says what you WILL do ("هـ…"). You cannot browse the web, see other apps or edit the program's code.
 instruction: a precise English instruction for the writer, including every detail the student asked for.
 reply: one short friendly confirmation in Egyptian Arabic saying exactly what you will change (e.g. "تمام، هزوّد أمثلة إكلينيكية في جزء التشخيص (رقم 3)").`,
-    JSON.stringify({ ITEMS: b.items.map((t, i) => `${i + 1}. ${t}`), SELECTED: b.selected, STATE: b.state || null, HISTORY: b.history.slice(-10), MESSAGE: b.message }),
-    900, 'fast');
+    JSON.stringify({ ITEMS: b.items.map((t, i) => `${i + 1}. ${t}`), SELECTED: b.selected, STATE: b.state || null, AVAILABLE_FILES: b.files || [], ATTACHMENTS: b.attachments || [], HAS_IMAGE: !!b.image, HISTORY: b.history.slice(-10), MESSAGE: b.message }),
+    1400, 'fast', 'low', b.image);
+  plan.files = (plan.files || []).filter(f => (b.files || []).includes(f));
   const max = b.items.length;
   plan.targets = [...new Set(plan.targets.filter(n => n >= 0 && n <= max))];
   return c.json(plan);
@@ -430,5 +439,21 @@ citationStyle: APA | Vancouver | Harvard. size: font size compact | normal | lar
 unsupported: if any part of the request is NOT covered by these settings (e.g. a specific font name, colours of headings, custom numbering like 1.1.1 subsections, footnotes), describe it briefly in Egyptian Arabic; else "".
 reply: one short Egyptian Arabic confirmation of exactly what changed (and what could not be done, honestly).`,
     JSON.stringify({ CURRENT: b.current, REQUEST: b.instruction }), 600, 'fast');
+  return c.json(out);
+});
+
+const CoverOut = z.object({
+  title: z.string(), subtitle: z.string(), student: z.string(), university: z.string(), faculty: z.string(), course: z.string(), professor: z.string(), date: z.string(),
+  nameSize: z.enum(['', 'normal', 'large', 'xlarge']), titleSize: z.enum(['', 'smaller', 'normal', 'large', 'xlarge']),
+  unsupported: z.string(),
+}).strict();
+
+v6.post('/cover/edit', async c => {
+  const b = z.object({ kind: z.enum(['research', 'lab', 'deck']), instruction: z.string().min(1).max(2000), current: z.any() }).strict().parse(await c.req.json());
+  const out = await ai(c, CoverOut,
+    `Map the student's request about the COVER / title page of their ${b.kind === 'deck' ? 'presentation (student = presenter name, university = institution)' : 'document'} to fields. Every text field: the NEW full value if they asked to change it, else "" (keep). Write names exactly as the student typed them.
+nameSize: size of the names/info lines on the cover ("كبّر الأسماء" = large, "كبّرها قوي" = xlarge, "رجّعها عادي" = normal), else "". titleSize: size of the cover title, else "".
+unsupported: anything requested that these fields cannot do (e.g. adding a logo image, changing the cover photo, moving elements), in short Egyptian Arabic; else "".`,
+    JSON.stringify({ CURRENT: b.current, REQUEST: b.instruction }), 700, 'fast');
   return c.json(out);
 });

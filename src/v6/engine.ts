@@ -8,12 +8,13 @@ import { api } from '../store';
 import { fillImages } from './slides';
 import { DEFAULT_STYLE, effectiveTheme, FONT_PAIRS, normalize, PALETTES, renderTemplate } from './templates';
 import { DEFAULT_DOC_STYLE, DEFAULT_FORMAT } from './docDesign';
+import { filesFor } from './exportFile';
 import type { DeckTheme, Msg, SlideState, V6Project } from './types';
 
 export type Ctx = {
   get: () => V6Project;
   update: (fn: (p: V6Project) => void) => void;
-  say: (content: string, tone?: Msg['tone']) => void;
+  say: (content: string, tone?: Msg['tone'], files?: string[]) => void;
   progress: (text: string) => void;
   signal: AbortSignal;
 };
@@ -102,7 +103,7 @@ function finishResearch(ctx: Ctx, failed: number) {
   const cited = new Set(written.flatMap(s => [...s.paragraphs.flatMap(x => x.sourceIds), ...s.tables.flatMap(t => t.sourceIds)]));
   ctx.update(q => { q.status = failed ? 'error' : 'ready'; q.progress = ''; q.lastError = failed ? `${failed} أجزاء وقفت بسبب ضغط أو خطأ مؤقت في خدمة الذكاء الاصطناعي` : ''; });
   if (failed) ctx.say(`اتكتب ${written.length} من ${p.sections!.length} أجزاء. فيه ${failed} جزء وقف بسبب ضغط على خدمة الذكاء الاصطناعي — اكتب "كمّل" وأنا أكمّله.`, 'error');
-  else ctx.say(`البحث جاهز ✅\n- **${words.toLocaleString('en')} كلمة** في ${written.length} أجزاء\n- **${cited.size} مرجع** مستخدم فعلًا جوه الكلام${p.ro!.sourceMode !== 'none' ? ` (${p.ro!.citationStyle})` : ''}\n\nتقدر تنزّله PDF أو Word، أو قولّي أعدّل إيه. مثال: "الجزء التالت ناشف زوّد أمثلة" أو "ضيف جزء عن العلاج الطبيعي".`, 'success');
+  else ctx.say(`البحث جاهز ✅\n- **${words.toLocaleString('en')} كلمة** في ${written.length} أجزاء\n- **${cited.size} مرجع** مستخدم فعلًا جوه الكلام${p.ro!.sourceMode !== 'none' ? ` (${p.ro!.citationStyle})` : ''}\n\nتقدر تنزّله PDF أو Word، أو قولّي أعدّل إيه. مثال: "الجزء التالت ناشف زوّد أمثلة" أو "ضيف جزء عن العلاج الطبيعي".`, 'success', ['premium_pdf', 'word']);
 }
 
 export async function resumeResearch(ctx: Ctx) {
@@ -242,7 +243,7 @@ function finishDeck(ctx: Ctx, failed: number) {
   const ok = p.slides!.filter(s => s.status === 'done').length;
   ctx.update(q => { q.status = failed ? 'error' : 'ready'; q.progress = ''; q.lastError = failed ? `${failed} شرايح وقفت بسبب ضغط أو خطأ مؤقت في خدمة الذكاء الاصطناعي` : ''; });
   if (failed) ctx.say(`اتصمم ${ok} من ${p.slides!.length} شريحة. الباقي وقف بسبب ضغط على الخدمة — اكتب "كمّل" وأنا أكمّله.`, 'error');
-  else ctx.say(`العرض جاهز ✅ **${ok} شريحة**${p.dk!.notes ? ' مع ملاحظات المتحدث' : ''}.\n\n- **🎨 التنسيق**: غيّر الألوان والخط وحجم العناوين والغلاف فورًا ومجانًا.\n- دوس على أي شريحة وبعدين **✏️ تعديل النص** عشان تعدّل الكلام بإيدك.\n- أو اكتب طلبك هنا: "الشريحة 4 زحمة"، "ضيف شريحة عن الأعراض بعد 5".`, 'success');
+  else ctx.say(`العرض جاهز ✅ **${ok} شريحة**${p.dk!.notes ? ' مع ملاحظات المتحدث' : ''}.\n\n- **🎨 التنسيق**: غيّر الألوان والخط وحجم العناوين والغلاف فورًا ومجانًا.\n- دوس على أي شريحة وبعدين **✏️ تعديل النص** عشان تعدّل الكلام بإيدك.\n- أو اكتب طلبك هنا: "الشريحة 4 زحمة"، "ضيف شريحة عن الأعراض بعد 5".`, 'success', ['pptx', 'deck_pdf']);
 }
 
 export async function resumeDeck(ctx: Ctx) {
@@ -277,7 +278,43 @@ export function undo(ctx: Ctx) {
   ctx.say(`رجّعت النسخة اللي قبل: ${last.label} ↩️`, 'success');
 }
 
-export async function handleMessage(ctx: Ctx, message: string, selected: number | null) {
+/** Cover / title page edits from chat, applied for real and reported honestly. */
+async function editCover(ctx: Ctx, message: string, instruction: string) {
+  const p = ctx.get();
+  const deck = p.kind === 'deck';
+  ctx.progress('بعدّل الغلاف…');
+  const ci = p.coverInfo || { presenter: '', institution: '', date: '' };
+  const c0 = p.slides?.[0]?.data;
+  const current = deck
+    ? { title: c0?.title || p.title, subtitle: c0?.subtitle || '', student: ci.presenter, university: ci.institution, date: ci.date, nameSize: p.style?.coverNameScale || 1, titleSize: p.style?.coverTitleScale || 1 }
+    : { title: p.title, ...p.cover, nameSize: p.coverStyle?.nameScale || 1, titleSize: p.coverStyle?.titleScale || 1 };
+  const r = await post('cover/edit', { kind: p.kind, instruction: instruction || message, current }, ctx.signal);
+  const NS: Record<string, number> = { normal: 1, large: 1.3, xlarge: 1.6 };
+  const TS: Record<string, number> = { smaller: 0.85, normal: 1, large: 1.15, xlarge: 1.3 };
+  const changes: string[] = [];
+  const label: Record<string, string> = { title: 'العنوان', subtitle: 'العنوان الفرعي', student: deck ? 'اسم المقدّم' : 'اسم الطالب', university: deck ? 'الجامعة' : 'الجامعة', faculty: 'الكلية', course: 'المادة', professor: 'اسم الدكتور', date: 'التاريخ' };
+  for (const k of Object.keys(label)) if (r[k] && r[k] !== (current as any)[k]) changes.push(`${label[k]}: ${r[k]}`);
+  if (r.nameSize) changes.push(`حجم الأسماء: ${Math.round(NS[r.nameSize] * 100)}%`);
+  if (r.titleSize) changes.push(`حجم العنوان: ${Math.round(TS[r.titleSize] * 100)}%`);
+  ctx.progress('');
+  if (!changes.length) return ctx.say(`مقدرتش أفهم التعديل المطلوب على الغلاف، فما غيّرتش حاجة.${r.unsupported ? `\n⚠️ مش مدعوم: ${r.unsupported}` : ''}\nاكتب مثلًا: "كبّر الأسماء في الغلاف" أو "غيّر اسم الدكتور لـ ...".`, 'error');
+  await applyStyle(ctx, q => {
+    if (deck) {
+      q.coverInfo = { presenter: r.student || ci.presenter, institution: r.university || ci.institution, date: r.date || ci.date };
+      q.style = { ...DEFAULT_STYLE, ...(q.style || {}), ...(r.nameSize ? { coverNameScale: NS[r.nameSize] } : {}), ...(r.titleSize ? { coverTitleScale: TS[r.titleSize] } : {}) };
+      const s0 = q.slides?.[0];
+      if (s0?.data) s0.data = { ...s0.data, ...(r.title ? { title: r.title } : {}), ...(r.subtitle ? { subtitle: r.subtitle } : {}) };
+      if (r.title) q.title = r.title;
+    } else {
+      q.cover = { ...q.cover, ...Object.fromEntries(['student', 'university', 'faculty', 'course', 'professor', 'date'].filter(k => r[k]).map(k => [k, r[k]])) };
+      if (r.title) q.title = r.title;
+      q.coverStyle = { nameScale: r.nameSize ? NS[r.nameSize] : q.coverStyle?.nameScale || 1, titleScale: r.titleSize ? TS[r.titleSize] : q.coverStyle?.titleScale || 1 };
+    }
+  }, 'تعديل الغلاف');
+  return ctx.say(`اتعدّل الغلاف فعلًا ✅\n${changes.map(c => '- ' + c).join('\n')}${r.unsupported ? `\n⚠️ مقدرش أعمل: ${r.unsupported}` : ''}\n${deck ? 'الشريحة الأولى اتحدّثت في المعاينة.' : 'الغلاف بيظهر في الملف، حمّله من هنا:'}`, 'success', deck ? undefined : ['premium_pdf', 'word']);
+}
+
+export async function handleMessage(ctx: Ctx, message: string, selected: number | null, attachments: { name: string; text: string; image?: string }[] = []) {
   const p = ctx.get();
   const deck = p.kind === 'deck';
   if (/^(كمل|كمّل|continue|resume|كمله|كملها)\s*$/i.test(message.trim())) return deck ? resumeDeck(ctx) : resumeResearch(ctx);
@@ -289,9 +326,15 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
   const total = deck ? p.slides!.length : p.outline!.length;
   const finished = deck ? p.slides!.filter(s => s.status === 'done').length : p.sections!.filter(Boolean).length;
   const state = { status: p.status, progress: p.progress.slice(0, 200), lastError: (p.lastError || '').slice(0, 400), done: finished, total };
-  const plan = await post('edit/understand', { message, kind: p.kind, items, history, selected: selected === null ? null : selected + 1, state }, ctx.signal);
+  const image = attachments.find(a => a.image)?.image;
+  const plan = await post('edit/understand', {
+    message, kind: p.kind, items, history, selected: selected === null ? null : selected + 1, state,
+    files: filesFor(p), attachments: attachments.map(a => ({ name: a.name, text: a.text.slice(0, 8000) })), ...(image ? { image } : {}),
+  }, ctx.signal);
   if (plan.action === 'answer') { ctx.progress(''); return ctx.say(plan.reply); }
-  ctx.say(plan.reply);
+  if (plan.action === 'send_files') { ctx.progress(''); return ctx.say(plan.reply || 'الملفات جاهزة، دوس على الزرار اللي تحت:', 'success', plan.files?.length ? plan.files : filesFor(p)); }
+  if (plan.action === 'cover') return editCover(ctx, message, plan.instruction);
+  if (plan.action !== 'restyle') ctx.say(plan.reply);
   const targets: number[] = plan.targets.filter((n: number) => n >= 1).map((n: number) => n - 1);
 
   if (plan.action === 'remove') {
@@ -341,10 +384,19 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
     ctx.progress('بغيّر التنسيق…');
     const st = await post('deck/style', { instruction: message, current: { ...(p.style || DEFAULT_STYLE) } }, ctx.signal);
     const pair = FONT_PAIRS.find(f => f.id === st.fonts);
-    await applyStyle(ctx, q => { q.style = { ...(q.style || DEFAULT_STYLE), ...(st.palette ? { palette: st.palette } : {}), ...(pair ? { headingFont: pair.heading, bodyFont: pair.body } : {}), titleScale: st.titleScale, bodyScale: st.bodyScale, showNumbers: st.showNumbers }; }, 'تنسيق');
+    const before = { ...DEFAULT_STYLE, ...(p.style || {}) };
+    const after = { ...before, ...(st.palette ? { palette: st.palette } : {}), ...(pair ? { headingFont: pair.heading, bodyFont: pair.body } : {}), titleScale: st.titleScale, bodyScale: st.bodyScale, showNumbers: st.showNumbers };
+    const changes: string[] = [];
+    if (after.palette !== before.palette) changes.push('الألوان: ' + (PALETTES.find(x => x.id === after.palette)?.name || 'الأصلية'));
+    if (after.headingFont !== before.headingFont) changes.push('الخط: ' + after.headingFont);
+    if (Math.abs(after.titleScale - before.titleScale) > 0.01) changes.push(`حجم العناوين ${Math.round(before.titleScale * 100)}% ← ${Math.round(after.titleScale * 100)}%`);
+    if (Math.abs(after.bodyScale - before.bodyScale) > 0.01) changes.push(`حجم النص ${Math.round(before.bodyScale * 100)}% ← ${Math.round(after.bodyScale * 100)}%`);
+    if (after.showNumbers !== before.showNumbers) changes.push(after.showNumbers ? 'أرقام الشرايح ظاهرة' : 'أرقام الشرايح مخفية');
     ctx.progress('');
+    if (!changes.length) return ctx.say('مقدرتش أترجم الطلب ده لتغيير في التنسيق، فما غيّرتش حاجة. جرّب تقولها بشكل تاني، أو افتح 🎨 التنسيق واختار بنفسك.', 'error');
+    await applyStyle(ctx, q => { q.style = after; }, 'تنسيق');
     const customN = ctx.get().slides!.filter(s => s.custom).length;
-    return ctx.say(`${st.reply} ✅${customN ? `\n(الشرايح المصممة خصيصًا (${customN}) بتاخد الألوان والخط الجديد، بس حجم الخط فيها يتغيّر لما تطلب تعديلها هي.)` : ''}`, 'success');
+    return ctx.say(`اتغيّر فعلًا ✅\n${changes.map(c => '- ' + c).join('\n')}${customN ? `\n(الشرايح المصممة خصيصًا (${customN}) بتاخد الألوان والخط الجديد، بس حجم الخط فيها يتغيّر لما تطلب تعديلها هي.)` : ''}`, 'success');
   }
 
   // revise
@@ -354,23 +406,35 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
     ctx.progress('بظبط التنسيق…');
     const cur = { ...DEFAULT_FORMAT, ...(p.docFormat || {}), citationStyle: p.ro!.citationStyle, ...(p.docStyle || DEFAULT_DOC_STYLE) };
     const f = await post('doc/format', { instruction: message, current: cur }, ctx.signal);
-    snapshot(ctx, 'تنسيق البحث');
-    ctx.update(q => {
-      const d = { ...DEFAULT_FORMAT, ...(q.docFormat || {}) };
-      if (f.numbering) d.numbering = f.numbering;
-      if (f.lineSpacing) d.lineSpacing = f.lineSpacing;
-      if (f.margins) d.margins = f.margins;
-      if (f.pageNumber) d.pageNumber = f.pageNumber;
-      if (f.toc) d.toc = f.toc === 'on';
-      if (f.abstract) d.abstract = f.abstract === 'on';
-      if (f.header) d.header = f.header;
-      q.docFormat = d;
-      if (f.citationStyle) q.ro = { ...q.ro!, citationStyle: f.citationStyle };
-      if (f.size || f.theme) q.docStyle = { ...(q.docStyle || DEFAULT_DOC_STYLE), ...(f.size ? { size: f.size } : {}), ...(f.theme ? { theme: f.theme } : {}) };
-    });
+    const d0 = { ...DEFAULT_FORMAT, ...(p.docFormat || {}) };
+    const d = { ...d0 };
+    if (f.numbering) d.numbering = f.numbering;
+    if (f.lineSpacing) d.lineSpacing = f.lineSpacing;
+    if (f.margins) d.margins = f.margins;
+    if (f.pageNumber) d.pageNumber = f.pageNumber;
+    if (f.toc) d.toc = f.toc === 'on';
+    if (f.abstract) d.abstract = f.abstract === 'on';
+    if (f.header) d.header = f.header;
+    const st0 = { ...DEFAULT_DOC_STYLE, ...(p.docStyle || {}) };
+    const st = { ...st0, ...(f.size ? { size: f.size } : {}), ...(f.theme ? { theme: f.theme } : {}) };
+    const L: Record<string, string> = { padded: '01', decimal: '1', roman: 'I', letters: 'أ / A', none: 'من غير ترقيم', auto: 'تلقائي', '1.15': 'مفرد', '1.5': '1.5', '2': 'دبل', narrow: 'ضيقة', normal: 'عادية', wide: 'واسعة', end: 'في الطرف', center: 'في النص', start: 'الطرف التاني', compact: 'صغير', large: 'كبير', modern: 'طبي عصري', academic: 'أكاديمي', clinical: 'هادي', elegant: 'فخم' };
+    const changes: string[] = [];
+    if (d.numbering !== d0.numbering) changes.push('ترقيم العناوين: ' + L[d.numbering]);
+    if (d.lineSpacing !== d0.lineSpacing) changes.push('المسافة بين السطور: ' + L[d.lineSpacing]);
+    if (d.margins !== d0.margins) changes.push('الهوامش: ' + L[d.margins]);
+    if (d.pageNumber !== d0.pageNumber) changes.push(d.pageNumber === 'none' ? 'رقم الصفحة: مخفي' : 'رقم الصفحة: ' + L[d.pageNumber]);
+    if (d.toc !== d0.toc) changes.push(d.toc ? 'صفحة الفهرس: ظاهرة' : 'صفحة الفهرس: اتشالت');
+    if (d.abstract !== d0.abstract) changes.push(d.abstract ? 'الـ Abstract: ظاهر' : 'الـ Abstract: اتشال');
+    if (d.header !== d0.header) changes.push('الهيدر: ' + d.header);
+    if (f.citationStyle && f.citationStyle !== p.ro!.citationStyle) changes.push('نظام المراجع: ' + f.citationStyle);
+    if (st.size !== st0.size) changes.push('حجم الخط: ' + L[st.size]);
+    if (st.theme !== st0.theme) changes.push('ستايل الـ PDF: ' + L[st.theme]);
     ctx.progress('');
-    const fixed = f.lineSpacing && f.lineSpacing !== 'auto';
-    return ctx.say(`${f.reply} ✅${fixed ? '\n(لما المسافة بين السطور تبقى رقم ثابت، عدد الصفحات ممكن يختلف عن اللي طلبته.)' : ''}${f.unsupported ? `\n⚠️ مقدرش أعمل: ${f.unsupported}` : ''}\nالتنسيق ده بيظهر في **PDF Premium**، ونظام المراجع بيتغيّر في كل الملفات.`, f.unsupported ? 'error' : 'success');
+    if (!changes.length) return ctx.say(`مقدرتش أنفّذ الطلب ده، فما غيّرتش أي حاجة.${f.unsupported ? `\n⚠️ مش مدعوم: ${f.unsupported}` : ''}\nجرّب تقولها بشكل تاني، أو افتح 🎨 شكل الـ PDF واختار بنفسك.`, 'error');
+    snapshot(ctx, 'تنسيق البحث');
+    ctx.update(q => { q.docFormat = d; q.docStyle = st; if (f.citationStyle) q.ro = { ...q.ro!, citationStyle: f.citationStyle }; });
+    const fixed = d.lineSpacing !== 'auto' && d.lineSpacing !== d0.lineSpacing;
+    return ctx.say(`اتغيّر فعلًا ✅\n${changes.map(c => '- ' + c).join('\n')}${fixed ? '\n(مع المسافة الثابتة عدد الصفحات ممكن يختلف عن اللي طلبته.)' : ''}${f.unsupported ? `\n⚠️ مقدرش أعمل: ${f.unsupported}` : ''}\nحمّل الملف من الزرار ده عشان تشوف التغيير:`, 'success', ['premium_pdf']);
   }
   snapshot(ctx, 'تعديل ' + list.map(i => i + 1).join('، '));
   let done = 0;
