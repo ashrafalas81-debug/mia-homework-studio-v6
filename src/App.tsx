@@ -21,25 +21,60 @@ const now = () => new Date().toISOString();
 function useProjects() {
   const ref = useRef(new Map<string, V6Project>());
   const [, setTick] = useState(0);
-  const timers = useRef(new Map<string, number>());
+  const [saveError, setSaveError] = useState('');
+  const dirty = useRef(new Set<string>());
+  const timer = useRef(0);
   const rerender = useCallback(() => setTick(t => t + 1), []);
-  useEffect(() => { listProjects().then(list => { list.forEach(p => { if (p.status === 'working') { p.status = 'error'; p.progress = ''; } ref.current.set(p.id, p); }); rerender(); }); }, [rerender]);
-  const persist = useCallback((p: V6Project) => {
-    clearTimeout(timers.current.get(p.id));
-    timers.current.set(p.id, window.setTimeout(() => saveProject(p).catch(() => {}), 400));
+  useEffect(() => {
+    navigator.storage?.persist?.().catch(() => {});
+    listProjects().then(list => {
+      list.forEach(p => {
+        if (p.status === 'working') {
+          p.status = 'error'; p.progress = '';
+          p.messages = [...p.messages, { id: uid(), role: 'assistant', content: 'الشغل وقف لما الصفحة اتقفلت. اللي اتعمل قبل كده محفوظ — دوس "كمّل" وأنا أكمّل من مكان ما وقفت.', at: now(), tone: 'error', files: ['resume'] }];
+        }
+        if (!ref.current.has(p.id)) ref.current.set(p.id, p);
+      });
+      rerender();
+    }).catch(() => setSaveError('المتصفح ده مش سامح بحفظ الملفات (ممكن تكون في وضع التصفح الخفي).'));
+  }, [rerender]);
+  /** Writes every changed project now. */
+  const flush = useCallback(() => {
+    clearTimeout(timer.current); timer.current = 0;
+    const ids = [...dirty.current]; dirty.current.clear();
+    for (const id of ids) {
+      const p = ref.current.get(id);
+      if (p) saveProject(p).then(() => setSaveError('')).catch(e => {
+        dirty.current.add(id);
+        setSaveError(/quota/i.test(String((e as Error)?.name || e)) ? 'مساحة التخزين على الجهاز مليانة — امسح مشاريع قديمة عشان الجديد يتحفظ.' : 'مقدرتش أحفظ آخر تعديل على الجهاز. نزّل ملفاتك احتياطي.');
+      });
+    }
   }, []);
+  // Throttled (not debounced): a long run that updates constantly still gets saved every second.
+  const persist = useCallback((id: string) => {
+    dirty.current.add(id);
+    if (!timer.current) timer.current = window.setTimeout(flush, 1000);
+  }, [flush]);
+  useEffect(() => {
+    const hide = () => { if (document.visibilityState === 'hidden') flush(); };
+    document.addEventListener('visibilitychange', hide);
+    window.addEventListener('pagehide', flush);
+    return () => { document.removeEventListener('visibilitychange', hide); window.removeEventListener('pagehide', flush); };
+  }, [flush]);
   const update = useCallback((id: string, fn: (p: V6Project) => void) => {
     const p = ref.current.get(id);
     if (!p) return;
+    const before = p.messages.length + '|' + p.status;
     fn(p);
     p.updatedAt = now();
     ref.current.set(id, { ...p });
-    persist(ref.current.get(id)!);
+    // A new chat message or status change is a milestone: save it right away. Progress ticks are throttled.
+    if (before !== p.messages.length + '|' + p.status) { dirty.current.add(id); flush(); } else persist(id);
     rerender();
-  }, [persist, rerender]);
-  const add = useCallback((p: V6Project) => { ref.current.set(p.id, p); persist(p); rerender(); }, [persist, rerender]);
-  const remove = useCallback((id: string) => { ref.current.delete(id); deleteProject(id); rerender(); }, [rerender]);
-  return { map: ref.current, update, add, remove };
+  }, [persist, flush, rerender]);
+  const add = useCallback((p: V6Project) => { ref.current.set(p.id, p); dirty.current.add(p.id); flush(); rerender(); }, [flush, rerender]);
+  const remove = useCallback((id: string) => { ref.current.delete(id); dirty.current.delete(id); deleteProject(id).catch(() => {}); rerender(); }, [rerender]);
+  return { map: ref.current, update, add, remove, saveError };
 }
 
 /* ═════════════════════════ App ═════════════════════════ */
@@ -86,7 +121,7 @@ export default function App() {
 
   return (
     <div className="app" dir="rtl">
-      {view.name === 'home' && <Home projects={[...store.map.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))} open={id => setView({ name: 'project', id })} pick={kind => setView({ name: 'form', kind })} remove={store.remove} />}
+      {view.name === 'home' && <Home projects={[...store.map.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))} open={id => setView({ name: 'project', id })} pick={kind => setView({ name: 'form', kind })} remove={store.remove} saveError={store.saveError} restore={list => list.forEach(p => { if (!store.map.has(p.id)) store.add(p); })} />}
       {view.name === 'form' && (view.kind === 'deck'
         ? <DeckForm back={() => setView({ name: 'home' })} research={[...store.map.values()].filter(p => p.kind !== 'deck' && p.sections?.some(Boolean))} start={start} />
         : <ResearchForm kind={view.kind} back={() => setView({ name: 'home' })} start={start} />)}
@@ -111,7 +146,27 @@ const PATHS: { kind: Kind; icon: string; title: string; desc: string; tags: stri
   { kind: 'lab', icon: '🧪', title: 'Lab Report', desc: 'تقرير معمل بالهيكل الأكاديمي الصحيح، مبني على نتايجك أنت.', tags: ['Aim → Conclusion', 'جداول النتايج', 'PDF + Word'] },
 ];
 
-function Home({ projects, open, pick, remove }: { projects: V6Project[]; open: (id: string) => void; pick: (k: Kind) => void; remove: (id: string) => void }) {
+const KIND_LABEL: Record<string, string> = { deck: 'عرض PowerPoint', lab: 'Lab Report', research: 'بحث' };
+function when(iso: string) {
+  const d = new Date(iso), days = Math.floor((Date.now() - d.getTime()) / 864e5);
+  if (days < 1) return 'النهارده ' + d.toLocaleTimeString('ar-EG', { hour: 'numeric', minute: '2-digit' });
+  if (days < 2) return 'امبارح';
+  return d.toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' });
+}
+function backup(projects: V6Project[]) {
+  const blob = new Blob([JSON.stringify({ app: 'homework-studio', version: 6, projects })], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `my-homework-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+async function readBackup(f: File): Promise<V6Project[]> {
+  const j = JSON.parse(await f.text());
+  const list = Array.isArray(j?.projects) ? j.projects : [];
+  const ok = list.filter((p: any) => p && typeof p.id === 'string' && ['research', 'lab', 'deck'].includes(p.kind) && Array.isArray(p.messages) && typeof p.title === 'string');
+  if (!ok.length) throw new Error('الملف ده مش نسخة احتياطية من الأداة.');
+  return ok.map((p: V6Project) => ({ ...p, status: p.status === 'working' ? 'error' : p.status, progress: '' }));
+}
+
+function Home({ projects, open, pick, remove, saveError, restore }: { projects: V6Project[]; open: (id: string) => void; pick: (k: Kind) => void; remove: (id: string) => void; saveError: string; restore: (list: V6Project[]) => void }) {
   return (
     <main className="home">
       <header className="hero">
@@ -132,14 +187,15 @@ function Home({ projects, open, pick, remove }: { projects: V6Project[]; open: (
           </button>
         ))}
       </section>
+      {saveError && <p className="save-warn">⚠️ {saveError}</p>}
       {projects.length > 0 && (
         <section className="recent">
-          <h2>شغلك اللي فات</h2>
-          {projects.slice(0, 20).map(p => (
+          <h2>ملفاتي <small>محفوظة على الجهاز ده</small></h2>
+          {projects.map(p => (
             <div key={p.id} className="recent-item">
               <button onClick={() => open(p.id)}>
                 <span>{p.kind === 'deck' ? '🎞️' : p.kind === 'lab' ? '🧪' : '📚'}</span>
-                <span className="r-title">{p.title}</span>
+                <span className="r-title"><bdi dir="auto">{p.title}</bdi><small>{KIND_LABEL[p.kind]} · {when(p.updatedAt)}</small></span>
                 <span className={'pill ' + p.status}>{p.status === 'ready' ? 'جاهز' : p.status === 'working' ? 'شغال' : 'محتاج يكمل'}</span>
               </button>
               <button className="icon-btn" aria-label="حذف" onClick={() => { if (confirm('تمسح المشروع ده نهائيًا؟')) remove(p.id); }}>🗑</button>
@@ -147,6 +203,15 @@ function Home({ projects, open, pick, remove }: { projects: V6Project[]; open: (
           ))}
         </section>
       )}
+      <section className="backup">
+        {projects.length > 0 && <button onClick={() => backup(projects)}>💾 نزّل نسخة احتياطية من ملفاتي</button>}
+        <label>📂 رجّع نسخة احتياطية<input type="file" accept="application/json,.json" hidden onChange={async e => {
+          const f = e.target.files?.[0]; e.target.value = '';
+          if (!f) return;
+          try { const list = await readBackup(f); restore(list); toast(`رجعت ${list.length} ملف ✅`); } catch (err) { alert((err as Error).message || 'الملف ده مش سليم.'); }
+        }} /></label>
+        <small>الملفات بتتحفظ على الموبايل ده بس. لو هتغيّر الموبايل أو تمسح بيانات المتصفح، نزّل نسخة احتياطية الأول.</small>
+      </section>
       <footer className="foot">Medical Intelligence Academy</footer>
     </main>
   );
@@ -361,6 +426,13 @@ function Workspace({ p, back, send, busy, stop, toDeck, act }: { p: V6Project; b
     window.addEventListener('mia-pick-image', on);
     return () => window.removeEventListener('mia-pick-image', on);
   }, []);
+  const sendRef = useRef(send); sendRef.current = send;
+  const busyRef = useRef(busy); busyRef.current = busy;
+  useEffect(() => {
+    const on = (e: Event) => { if (!busyRef.current) sendRef.current(String((e as CustomEvent).detail), null, []); };
+    window.addEventListener('mia-send', on);
+    return () => window.removeEventListener('mia-send', on);
+  }, []);
   const [selected, setSelected] = useState<number | null>(null);
   const [unread, setUnread] = useState(0);
   const lastCount = useRef(p.messages.length);
@@ -381,6 +453,12 @@ function Workspace({ p, back, send, busy, stop, toDeck, act }: { p: V6Project; b
         <button className={tab === 'file' ? 'on' : ''} onClick={() => setTab('file')}>{deck ? '🎞️ الشرايح' : '📄 البحث'}</button>
         <button className={tab === 'chat' ? 'on' : ''} onClick={() => { setTab('chat'); setUnread(0); }}>💬 المحادثة{unread > 0 && <span className="badge">{unread}</span>}</button>
       </nav>
+      {p.status === 'error' && tab === 'file' && (
+        <div className="err-banner">
+          <span>⚠️ {p.lastError || 'الشغل وقف قبل ما يخلص.'}</span>
+          <button onClick={() => window.dispatchEvent(new CustomEvent('mia-send', { detail: 'كمّل' }))}>▶️ كمّل</button>
+        </div>
+      )}
       {deck && p.slides && p.status !== 'working' && tab === 'file' && (
         <div className="toolbar">
           <button onClick={() => setSheet('style')}>🎨 التنسيق</button>
@@ -851,7 +929,9 @@ function FileButtons({ p, files }: { p: V6Project; files: string[] }) {
   const [work, setWork] = useState('');
   return (
     <div className="file-btns">
-      {files.map(f => f.startsWith('pick_image:')
+      {files.map(f => f === 'resume'
+        ? <button key={f} onClick={() => window.dispatchEvent(new CustomEvent('mia-send', { detail: 'كمّل' }))}>▶️ كمّل الشغل</button>
+        : f.startsWith('pick_image:')
         ? <button key={f} onClick={() => window.dispatchEvent(new CustomEvent('mia-pick-image', { detail: Number(f.split(':')[1]) }))}>🖼️ اختار الصورة ({Number(f.split(':')[1]) + 1})</button>
         : <button key={f} disabled={!!work} onClick={async () => { try { toast(await exportFile(p, f, setWork)); } catch (e) { alert((e as Error).message); } setWork(''); }}>{FILE_LABELS[f] || f} ⬇</button>)}
       {work && <small>{work}</small>}

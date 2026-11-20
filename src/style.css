@@ -309,3 +309,13 @@ textarea{resize:vertical}
 .logo-in img{height:48px;max-width:140px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#fff;padding:4px}
 .logo-in .ghost{padding:8px 12px;font-size:13.5px;cursor:pointer}
 .logo-in input{display:none}
+.r-title small{display:block;font-weight:500;font-size:12px;color:var(--muted,#6b7280);margin-top:2px}
+.recent h2 small{font-size:12px;font-weight:500;color:var(--muted,#6b7280);margin-inline-start:6px}
+.save-warn{background:#fff4e5;border:1px solid #f5c26b;color:#7a4a00;border-radius:12px;padding:10px 12px;margin:10px 0;font-size:14px}
+.backup{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0 4px}
+.backup button,.backup label{border:1px dashed var(--line);border-radius:12px;padding:9px 12px;background:var(--card);font-size:14px;cursor:pointer}
+.backup small{flex-basis:100%;color:var(--muted,#6b7280);font-size:12px;line-height:1.6}
+.err-banner{display:flex;align-items:center;gap:8px;margin:8px 12px 0;padding:10px 12px;border-radius:12px;background:#fff1f0;border:1px solid #f3b4ae;color:#8a1c12;font-size:14px}
+.err-banner span{flex:1;line-height:1.6}
+.err-banner button{white-space:nowrap;background:#8a1c12;color:#fff;border-radius:10px;padding:7px 12px;font-weight:700}
+.r-title bdi{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -108,6 +108,7 @@ function finishResearch(ctx: Ctx, failed: number) {
 
 export async function resumeResearch(ctx: Ctx) {
   const p = ctx.get();
+  if (!p.sections?.some(Boolean)) return runResearch(ctx); // stopped before any part was written: start clean
   const missing = p.sections!.map((s, i) => (s ? -1 : i)).filter(i => i >= 0);
   if (!missing.length) return finishResearch(ctx, 0);
   const per = distribute(p.sources, p.outline!.length);
@@ -248,6 +249,7 @@ function finishDeck(ctx: Ctx, failed: number) {
 
 export async function resumeDeck(ctx: Ctx) {
   const p = ctx.get();
+  if (!p.slides?.length) return runDeck(ctx); // stopped before the plan existed
   const missing = p.slides!.map((s, i) => (s.status === 'done' ? -1 : i)).filter(i => i >= 0);
   ctx.update(q => { q.status = 'working'; });
   const errors = await produce(ctx, missing, 'بكمّل الشرايح…');
