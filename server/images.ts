@@ -137,6 +137,7 @@ export async function findSlideImage(query: string, request: typeof fetch = fetc
 
 export type GalleryItem = { thumb: string; full: string; title: string; credit: string; license: string; source: 'Wikimedia' | 'Openverse'; page: string; width: number; height: number };
 
+const IMAGE_HOSTS = /^https:\/\/(upload\.wikimedia\.org|thumb\.wikimedia\.org|api\.openverse\.org|api\.openverse\.engineering|live\.staticflickr\.com|farm\d+\.staticflickr\.com)\//;
 async function openverse(query: string, request: typeof fetch): Promise<GalleryItem[]> {
   const u = new URL('https://api.openverse.org/v1/images/');
   u.searchParams.set('q', query);
@@ -147,7 +148,7 @@ async function openverse(query: string, request: typeof fetch): Promise<GalleryI
   if (!r.ok) return [];
   const j: any = await r.json();
   return (j.results || []).filter((x: any) => x.thumbnail && !UNSAFE.test(`${x.title} ${(x.tags || []).map((t: any) => t.name).join(' ')}`)).map((x: any) => ({
-    thumb: x.thumbnail, full: x.thumbnail, title: String(x.title || '').slice(0, 120),
+    thumb: x.thumbnail, full: IMAGE_HOSTS.test(String(x.url || '')) ? String(x.url) : x.thumbnail, title: String(x.title || '').slice(0, 120),
     credit: `${String(x.title || 'Image').slice(0, 70)} — ${String(x.creator || 'unknown').slice(0, 50)}, ${String(x.license || '').toUpperCase()} ${x.license_version || ''}, via ${x.source || 'Openverse'}`.slice(0, 220),
     license: `${x.license} ${x.license_version || ''}`.trim(), source: 'Openverse' as const, page: x.foreign_landing_url || '', width: Number(x.width || 0), height: Number(x.height || 0),
   }));
@@ -163,7 +164,7 @@ export async function searchGallery(query: string, request: typeof fetch = fetch
     openverse(core, request).catch(() => [] as GalleryItem[]),
   ]);
   const w: GalleryItem[] = wiki.slice(0, 10).map(c => ({
-    thumb: c.thumb.replace(/\/\d+px-/, '/400px-'), full: c.thumb, title: c.title,
+    thumb: c.thumb.replace(/\/\d+px-/, '/500px-'), full: c.thumb, title: c.title,
     credit: `${c.title.replace(/\.[a-z]+$/i, '')} — ${c.artist}, ${c.license}, via Wikimedia Commons`.slice(0, 220),
     license: c.license, source: 'Wikimedia', page: c.url, width: c.width, height: c.height,
   }));
@@ -172,7 +173,6 @@ export async function searchGallery(query: string, request: typeof fetch = fetch
   return out;
 }
 
-const IMAGE_HOSTS = /^https:\/\/(upload\.wikimedia\.org|api\.openverse\.org|api\.openverse\.engineering)\//;
 /** Downloads a chosen gallery image (only from the licensed sources) as a data URL. */
 export async function fetchGalleryImage(url: string, request: typeof fetch = fetch) {
   if (!IMAGE_HOSTS.test(url)) throw new Error('Image source not allowed.');
@@ -181,6 +181,6 @@ export async function fetchGalleryImage(url: string, request: typeof fetch = fet
   const type = (r.headers.get('content-type') || '').split(';')[0];
   if (!/^image\/(jpeg|png|gif|webp)$/.test(type)) throw new Error('Unsupported image type.');
   const buf = await r.arrayBuffer();
-  if (buf.byteLength > 4_000_000) throw new Error('Image too large.');
+  if (buf.byteLength > 3_200_000) throw new Error('Image too large.');
   return `data:${type};base64,${toBase64(buf)}`;
 }

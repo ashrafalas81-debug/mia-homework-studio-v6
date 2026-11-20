@@ -73,7 +73,7 @@ export function ImagePicker({ query, title, onPick, close, allowNone = true }: {
           {!items && <div className="pick-grid">{Array.from({ length: 6 }, (_, i) => <span key={i} className="pick-ph" />)}</div>}
           {items && items.length > 0 && <div className="pick-grid">{items.map((it, i) => (
             <button key={i} className="pick-item" onClick={() => choose(it)} disabled={!!busy} title={it.credit}>
-              <img src={it.thumb} alt={it.title} loading="lazy" referrerPolicy="no-referrer" />
+              <img src={it.thumb} alt={it.title} loading="lazy" referrerPolicy="no-referrer" onError={e => { const b = (e.currentTarget.closest('button') as HTMLElement | null); if (b) b.style.display = 'none'; }} />
               <small>{it.source} · {it.license}</small>
             </button>
           ))}</div>}
