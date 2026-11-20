@@ -39,6 +39,9 @@ export type Cover = { student: string; university: string; faculty: string; cour
 
 export type Msg = { id: string; role: 'user' | 'assistant'; content: string; at: string; tone?: 'progress' | 'error' | 'success'; files?: string[]; attachments?: string[] };
 
+/** A picture the student chose for a research section. */
+export type Figure = { data: string; caption: string; credit: string; width: number; height: number };
+
 export type V6Project = {
   id: string;
   kind: Kind;
@@ -65,7 +68,9 @@ export type V6Project = {
   docFormat?: import('./docDesign').DocFormat;
   lastError?: string;
   coverStyle?: { nameScale: number; titleScale: number };
+  /** University / faculty logo the student uploaded (data URL). */
+  logo?: string;
   coverInfo?: CoverInfo;
   // undo
-  history?: { label: string; sections?: (AcademicSection | null)[]; slides?: SlideState[]; style?: DeckStyle; coverInfo?: CoverInfo }[];
+  history?: { label: string; sections?: (AcademicSection | null)[]; slides?: SlideState[]; style?: DeckStyle; coverInfo?: CoverInfo; extra?: Partial<V6Project> }[];
 };

@@ -8,6 +8,7 @@ import { applyStyle, handleMessage, redraw, referenceList, runDeck, runResearch,
 import { DEFAULT_STYLE, FONT_PAIRS, PALETTES, type SlideData } from './v6/templates';
 import { readFile, type ReadResult } from './v6/readFile';
 import { exportFile, FILE_LABELS } from './v6/exportFile';
+import { ImagePicker, type PickedImage } from './v6/ImagePicker';
 import { DEFAULT_DOC_STYLE, DEFAULT_FORMAT, DOC_THEMES, parts, sectionLabel, type DocFormat, type DocStyle, type DocTheme } from './v6/docDesign';
 import { exportDeckPdf, exportPptx, slideDocument, W, H } from './v6/slides';
 import type { DeckOptions, Kind, Msg, ResearchOptions, V6Project } from './v6/types';
@@ -354,7 +355,12 @@ function DeckForm({ back, start, research }: { back: () => void; start: (p: V6Pr
 
 function Workspace({ p, back, send, busy, stop, toDeck, act }: { p: V6Project; back: () => void; send: (t: string, selected: number | null, attachments: ReadResult[]) => void; busy: boolean; stop: () => void; toDeck: () => void; act: (job: (ctx: Ctx) => Promise<void>) => void }) {
   const [tab, setTab] = useState<'file' | 'chat'>('file');
-  const [sheet, setSheet] = useState<'' | 'style' | 'text'>('');
+  const [sheet, setSheet] = useState<'' | 'style' | 'text' | 'image'>('');
+  useEffect(() => {
+    const on = (e: Event) => { setSelected((e as CustomEvent).detail); setSheet('image'); };
+    window.addEventListener('mia-pick-image', on);
+    return () => window.removeEventListener('mia-pick-image', on);
+  }, []);
   const [selected, setSelected] = useState<number | null>(null);
   const [unread, setUnread] = useState(0);
   const lastCount = useRef(p.messages.length);
@@ -379,17 +385,26 @@ function Workspace({ p, back, send, busy, stop, toDeck, act }: { p: V6Project; b
         <div className="toolbar">
           <button onClick={() => setSheet('style')}>🎨 التنسيق</button>
           <button disabled={selected === null} onClick={() => setSheet('text')}>✏️ تعديل النص{selected !== null ? ` (${selected + 1})` : ''}</button>
+          <button disabled={selected === null} onClick={() => setSheet('image')}>🖼️ صورة{selected !== null ? ` (${selected + 1})` : ''}</button>
         </div>
       )}
       {!deck && p.sections?.some(Boolean) && p.status !== 'working' && tab === 'file' && (
         <div className="toolbar">
           <button onClick={() => setSheet('style')}>🎨 شكل الـ PDF</button>
           <button disabled={selected === null} onClick={() => setSheet('text')}>✏️ تعديل النص{selected !== null ? ` (${selected + 1})` : ''}</button>
+          <button disabled={selected === null} onClick={() => setSheet('image')}>🖼️ صورة{selected !== null ? ` (${selected + 1})` : ''}</button>
         </div>
       )}
       {!deck && sheet === 'style' && <DocStyleSheet p={p} close={() => setSheet('')} act={act} />}
       {!deck && sheet === 'text' && selected !== null && p.sections?.[selected] && <DocTextSheet p={p} i={selected} close={() => setSheet('')} act={act} />}
       {deck && sheet === 'style' && <StyleSheet p={p} close={() => setSheet('')} act={act} />}
+      {sheet === 'image' && selected !== null && (deck ? p.slides?.[selected] : p.sections?.[selected]) && (
+        <ImagePicker
+          title={deck ? `صورة للشريحة ${selected + 1}` : `صورة للجزء ${selected + 1}`}
+          query={deck ? (p.slides![selected].data?.imageQuery || p.slides![selected].plan.title) : (p.sections![selected]!.heading)}
+          close={() => setSheet('')}
+          onPick={img => act(ctx => applyStyle(ctx, q => setImage(q, selected, img), img ? 'إضافة صورة' : 'شيل الصورة'))} />
+      )}
       {deck && sheet === 'text' && selected !== null && p.slides?.[selected] && <TextSheet p={p} i={selected} close={() => setSheet('')} act={act} />}
       {busy && p.progress && <div className="progress"><span className="spinner" />{p.progress}<button onClick={stop}>إيقاف</button></div>}
       <div className={'ws-body tab-' + tab}>
@@ -484,6 +499,7 @@ function DocPreview({ p, selected, select }: { p: V6Project; selected: number | 
                 <div className="tbl" key={k}><b>{t.title}</b><table><thead><tr>{t.headers.map((h, j) => <th key={j}>{h}</th>)}</tr></thead><tbody>{t.rows.map((r, j) => <tr key={j}>{r.map((c, m) => <td key={m}>{c}</td>)}</tr>)}</tbody></table></div>
               ))}
               {s.diagram && <Diagram d={s.diagram} />}
+              {(s as any).figure?.data && <figure className="doc-fig"><img src={(s as any).figure.data} alt="" /><figcaption>{(s as any).figure.caption}{(s as any).figure.credit && <small>{(s as any).figure.credit}</small>}</figcaption></figure>}
               {(s as any).keyPoint && <div className="kp-box"><b>💡 {rtl ? 'النقطة الأهم' : 'Key point'}</b>{(s as any).keyPoint}</div>}
             </>}
             {selected === i && <div className="sel-hint" dir="rtl">✏️ اكتب تحت اللي عاوز تغيّره في الجزء ده</div>}
@@ -556,6 +572,40 @@ function DeckPreview({ p, selected, select }: { p: V6Project; selected: number |
   );
 }
 
+function LogoInput({ value, onChange }: { value?: string; onChange: (v: string | undefined) => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="logo-in">
+      {value ? <img src={value} alt="" /> : <span className="hint">مفيش لوجو. ملفات الطالب مفيهاش أي اسم أو لوجو للأداة.</span>}
+      <label className="ghost">{busy ? '⏳' : value ? 'غيّر اللوجو' : '+ ارفع لوجو'}<input type="file" accept="image/*" onChange={async e => {
+        const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+        setBusy(true);
+        try { const { toJpeg } = await import('./v6/readFile'); onChange(await toJpeg(f, 600, 0.9)); } catch (err) { alert((err as Error).message); }
+        setBusy(false);
+      }} /></label>
+      {value && <button className="ghost" onClick={() => onChange(undefined)}>🗑 شيل</button>}
+    </div>
+  );
+}
+
+/** Puts a chosen picture on a slide or a research section (or removes it). */
+function setImage(q: V6Project, i: number, img: PickedImage | null) {
+  if (q.kind === 'deck') {
+    const s = q.slides![i];
+    if (!s.data) return;
+    if (!img) { s.data = { ...s.data, userImage: undefined, imageCredit: undefined, imageQuery: '' }; return; }
+    const keep = ['image_points', 'image_full', 'cover'].includes(s.data.layout);
+    s.data = { ...s.data, userImage: img.data, imageCredit: img.credit, layout: keep ? s.data.layout : s.data.items.length >= 2 ? 'image_points' : 'image_full' };
+    s.custom = false;
+    s.plan.layout = s.data.layout;
+  } else {
+    const sec = q.sections![i] as any;
+    if (!sec) return;
+    if (!img) { delete sec.figure; return; }
+    sec.figure = { data: img.data, credit: img.credit, width: img.width, height: img.height, caption: sec.figure?.caption || sec.heading };
+  }
+}
+
 /* ─────────── Free, instant editing (no AI) ─────────── */
 
 function Sheet({ title, close, children }: { title: string; close: () => void; children: React.ReactNode }) {
@@ -602,6 +652,8 @@ function StyleSheet({ p, close, act }: { p: V6Project; close: () => void; act: (
         <input value={cv.institution} placeholder="الجامعة / الكلية" onChange={e => setCv(x => ({ ...x, institution: e.target.value }))} />
         <input value={cv.date} placeholder="التاريخ" onChange={e => setCv(x => ({ ...x, date: e.target.value }))} />
       </div>
+      <h4>🏛️ لوجو الجامعة (اختياري)</h4>
+      <LogoInput value={p.coverInfo?.logo} onChange={v => apply(q => { q.coverInfo = { ...(q.coverInfo || { presenter: '', institution: '', date: '' }), logo: v }; }, 'اللوجو')} />
       <h4>حجم الأسماء في الغلاف</h4>
       <Chips value={st.coverNameScale || 1} onChange={v => setStyle({ coverNameScale: v }, 'حجم الأسماء')} options={[[1, 'عادي'], [1.3, 'كبير'], [1.6, 'كبير جدًا']]} />
       <button className="primary wide-btn" onClick={() => apply(q => {
@@ -674,16 +726,17 @@ function DocStyleSheet({ p, close, act }: { p: V6Project; close: () => void; act
   const set = <K extends keyof DocFormat>(k: K, v: DocFormat[K]) => setFm(x => ({ ...x, [k]: v }));
   const [cov, setCov] = useState({ title: p.title, ...p.cover });
   const [cs2, setCs2] = useState(p.coverStyle || { nameScale: 1, titleScale: 1 });
+  const [logo, setLogo] = useState<string | undefined>(p.logo);
 
   const [prev, setPrev] = useState<{ images: string[]; total: number } | null>(null);
   const [busy, setBusy] = useState(true);
   useEffect(() => {
     let live = true;
     setBusy(true);
-    import('./v6/docDesign').then(m => m.previewPages({ ...p, title: cov.title || p.title, cover: { ...p.cover, ...cov }, coverStyle: cs2, docFormat: fm, ro: p.ro ? { ...p.ro, citationStyle: cs } : p.ro }, st, 3)).then(r => { if (live) { setPrev(r); setBusy(false); } }).catch(() => live && setBusy(false));
+    import('./v6/docDesign').then(m => m.previewPages({ ...p, logo, title: cov.title || p.title, cover: { ...p.cover, ...cov }, coverStyle: cs2, docFormat: fm, ro: p.ro ? { ...p.ro, citationStyle: cs } : p.ro }, st, 3)).then(r => { if (live) { setPrev(r); setBusy(false); } }).catch(() => live && setBusy(false));
     return () => { live = false; };
-  }, [st, fm, cs, cov, cs2, p.updatedAt]);
-  const save = () => { act(ctx => applyStyle(ctx, q => { q.docStyle = st; q.docFormat = fm; if (q.ro) q.ro = { ...q.ro, citationStyle: cs }; const { title, ...c } = cov; q.title = title || q.title; q.cover = { ...q.cover, ...c }; q.coverStyle = cs2; }, 'شكل الـ PDF')); close(); };
+  }, [st, fm, cs, cov, cs2, logo, p.updatedAt]);
+  const save = () => { act(ctx => applyStyle(ctx, q => { q.docStyle = st; q.docFormat = fm; if (q.ro) q.ro = { ...q.ro, citationStyle: cs }; const { title, ...c } = cov; q.title = title || q.title; q.cover = { ...q.cover, ...c }; q.coverStyle = cs2; q.logo = logo; }, 'شكل الـ PDF')); close(); };
   return (
     <Sheet title="🎨 شكل الـ PDF" close={close}>
       <h4>الستايل</h4>
@@ -700,6 +753,8 @@ function DocStyleSheet({ p, close, act }: { p: V6Project; close: () => void; act
         {([['student', 'اسم الطالب'], ['university', 'الجامعة'], ['faculty', 'الكلية'], ['course', 'المادة'], ['professor', 'اسم الدكتور'], ['date', 'التاريخ']] as const).map(([k, l]) =>
           <input key={k} dir="auto" placeholder={l} value={(cov as any)[k] || ''} onChange={e => setCov(x => ({ ...x, [k]: e.target.value }))} />)}
       </div>
+      <h4>🏛️ لوجو الجامعة (اختياري)</h4>
+      <LogoInput value={logo} onChange={setLogo} />
       <h4>حجم الأسماء في الغلاف</h4>
       <Chips value={cs2.nameScale} onChange={v => setCs2(x => ({ ...x, nameScale: v }))} options={[[1, 'عادي'], [1.3, 'كبير'], [1.6, 'كبير جدًا']]} />
       <h4>حجم عنوان الغلاف</h4>
@@ -743,6 +798,7 @@ function DocTextSheet({ p, i, close, act }: { p: V6Project; i: number; close: ()
         </div>
       ))}
       <button className="ghost wide" onClick={() => setS(y => ({ ...y, paragraphs: [...y.paragraphs, { text: '', sourceIds: [] }] }))}>+ فقرة جديدة</button>
+      {(s as any).figure && <><label className="lbl">🖼️ تعليق الصورة</label><input dir="auto" value={(s as any).figure.caption} onChange={e => setS(x => ({ ...x, figure: { ...(x as any).figure, caption: e.target.value } } as any))} /></>}
       <label className="lbl">💡 النقطة الأهم (بتظهر في صندوق ملوّن)</label>
       <textarea rows={2} dir="auto" value={s.keyPoint || ''} onChange={e => setS(x => ({ ...x, keyPoint: e.target.value }))} />
       <p className="hint">{words} كلمة في الجزء ده. المراجع جوه كل فقرة بتفضل زي ما هي.</p>
@@ -795,7 +851,9 @@ function FileButtons({ p, files }: { p: V6Project; files: string[] }) {
   const [work, setWork] = useState('');
   return (
     <div className="file-btns">
-      {files.map(f => <button key={f} disabled={!!work} onClick={async () => { try { toast(await exportFile(p, f, setWork)); } catch (e) { alert((e as Error).message); } setWork(''); }}>{FILE_LABELS[f] || f} ⬇</button>)}
+      {files.map(f => f.startsWith('pick_image:')
+        ? <button key={f} onClick={() => window.dispatchEvent(new CustomEvent('mia-pick-image', { detail: Number(f.split(':')[1]) }))}>🖼️ اختار الصورة ({Number(f.split(':')[1]) + 1})</button>
+        : <button key={f} disabled={!!work} onClick={async () => { try { toast(await exportFile(p, f, setWork)); } catch (e) { alert((e as Error).message); } setWork(''); }}>{FILE_LABELS[f] || f} ⬇</button>)}
       {work && <small>{work}</small>}
     </div>
   );

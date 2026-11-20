@@ -42,6 +42,8 @@ export function mockAI(_schema: unknown, system: string, user: string): any {
   if (/route a student's chat message/.test(system)) {
     const m: string = u.MESSAGE;
     const num = Number((m.match(/\d+/) || [])[0]);
+    if (/حط صورة|غير الصورة|اختار الصورة/.test(m) && !u.HAS_IMAGE) return { action: 'pick_image', targets: [num || 1], files: [], instruction: '', reply: 'اختار الصورة اللي تعجبك.' };
+    if (/لون|أحمر|احمر|إطار|اطار/.test(m)) return { action: 'restyle', targets: [], files: [], instruction: m, reply: 'هغيّر الشكل.' };
     if (/الكفر|الغلاف|الكافر/.test(m)) return { action: 'cover', targets: [], files: [], instruction: m, reply: 'هعدّل الغلاف.' };
     if (/ابعت|فين الملف|نزّله|نزله|عاوز الملف/.test(m)) return { action: 'send_files', targets: [], files: u.AVAILABLE_FILES, instruction: '', reply: 'الملفات تحت، دوس على الزرار.' };
     if (u.HAS_IMAGE && /ضيف/.test(m)) return { action: 'revise', targets: [num || 2], files: [], instruction: 'Use the uploaded image', reply: 'هحط الصورة في الشريحة.' };
@@ -75,6 +77,10 @@ export function mockAI(_schema: unknown, system: string, user: string): any {
         imageQuery: ['cover', 'image_points', 'image_full'].includes(s.layout) ? 'rotator cuff' : '', source: k % 3 === 0 ? 'Source: Smith 2023' : '', notes: 'Speaker notes for ' + s.title,
       })),
     };
+  }
+  if (/careful CSS designer/.test(system)) {
+    const doc = /research PDF/.test(system);
+    return { css: doc ? '.mp .hdr{color:#C1121F;border-bottom:2px solid #C1121F}.mp .sh h2{color:#C1121F}' : '.t h2{color:#C1121F}', changes: ['لون الهيدر والعناوين أحمر'], unsupported: '' };
   }
   if (/request about the COVER/.test(system)) {
     const r = u.REQUEST as string;

@@ -153,7 +153,7 @@ export async function word(p: Project) {
   return Packer.toBlob(
     new Document({
       title: p.doc.title,
-      creator: 'MIA Homework Studio',
+      creator: p.cover.student || 'Student',
       styles: {
         default: { document: { run: { font: 'Arial', size: 24 } } },
       },

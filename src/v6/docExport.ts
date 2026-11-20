@@ -16,7 +16,7 @@ export function toLegacy(p: V6Project): Project {
     selected: p.sources.map(s => s.id),
     brief: (o.path === 'lab' ? { taskType: 'lab-report' } : null) as any,
     cover: { enabled: true, student: p.cover.student, university: p.cover.university, faculty: p.cover.faculty, department: '', course: p.cover.course, professor: p.cover.professor, year: '', date: p.cover.date || new Date().toLocaleDateString('en-GB') },
-    docImages: {},
+    docImages: Object.fromEntries(sections.filter(s => (s as any).figure?.data).map(s => { const f = (s as any).figure; return [s.id, [{ data: f.data, width: f.width, height: f.height, caption: [f.caption, f.credit].filter(Boolean).join(' — ') }]]; })),
   };
 }
 

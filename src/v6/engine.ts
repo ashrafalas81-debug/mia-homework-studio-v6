@@ -63,9 +63,9 @@ async function writeSection(ctx: Ctx, i: number, given: Source[], instruction?: 
   const res = await retry(() => post('research/section', {
     options: p.ro, title: p.title, outline: p.outline!.map(o => o.heading), section: p.outline![i], index: i,
     sourceIds: given.map(s => s.id), sources: given.map(slim),
-    ...(instruction ? { instruction, previous: p.sections![i] } : {}),
+    ...(instruction ? { instruction, previous: (({ figure: _f, ...rest }: any) => rest)(p.sections![i] || {}) } : {}),
   }, ctx.signal));
-  ctx.update(q => { q.sections![i] = res.section; });
+  ctx.update(q => { const fig = (q.sections![i] as any)?.figure; q.sections![i] = fig ? { ...res.section, figure: fig } : res.section; });
 }
 
 export async function runResearch(ctx: Ctx) {
@@ -265,7 +265,7 @@ export async function applyStyle(ctx: Ctx, fn: (p: V6Project) => void, label = '
 
 export function snapshot(ctx: Ctx, label: string) {
   ctx.update(p => {
-    p.history = [...(p.history || []).slice(-14), { label, sections: p.sections ? structuredClone(p.sections) : undefined, slides: p.slides ? structuredClone(p.slides) : undefined, style: p.style ? { ...p.style } : undefined, coverInfo: p.coverInfo ? { ...p.coverInfo } : undefined }];
+    p.history = [...(p.history || []).slice(-14), { label, sections: p.sections ? structuredClone(p.sections) : undefined, slides: p.slides ? structuredClone(p.slides) : undefined, style: p.style ? { ...p.style } : undefined, coverInfo: p.coverInfo ? { ...p.coverInfo } : undefined, extra: structuredClone({ docFormat: p.docFormat, docStyle: p.docStyle, cover: p.cover, coverStyle: p.coverStyle, logo: p.logo, title: p.title, ro: p.ro }) }];
   });
 }
 
@@ -273,9 +273,23 @@ export function undo(ctx: Ctx) {
   const p = ctx.get();
   const last = p.history?.at(-1);
   if (!last) return ctx.say('مفيش تعديل قبل كده أرجّعه.');
-  ctx.update(q => { if (last.sections) q.sections = last.sections; if (last.slides) q.slides = last.slides; if (last.style) q.style = last.style; if (last.coverInfo) q.coverInfo = last.coverInfo; q.history = q.history!.slice(0, -1); });
+  ctx.update(q => { if (last.sections) q.sections = last.sections; if (last.slides) q.slides = last.slides; if (last.style) q.style = last.style; if (last.coverInfo) q.coverInfo = last.coverInfo; if (last.extra) Object.assign(q, last.extra); q.history = q.history!.slice(0, -1); });
   if (p.kind === 'deck') redraw(ctx);
   ctx.say(`رجّعت النسخة اللي قبل: ${last.label} ↩️`, 'success');
+}
+
+/** Free design layer: the AI writes scoped CSS for requests the ready-made options can't express. */
+async function applyCss(ctx: Ctx, message: string) {
+  const p = ctx.get();
+  const deck = p.kind === 'deck';
+  const current = deck ? p.style?.customCss || '' : p.docFormat?.css || '';
+  const r = await post('style/css', { kind: deck ? 'deck' : 'doc', instruction: message, current }, ctx.signal);
+  if (!r.css || r.css === current || !r.changes?.length) return { changes: [] as string[], unsupported: r.unsupported as string };
+  await applyStyle(ctx, q => {
+    if (deck) q.style = { ...DEFAULT_STYLE, ...(q.style || {}), customCss: r.css };
+    else q.docFormat = { ...DEFAULT_FORMAT, ...(q.docFormat || {}), css: r.css };
+  }, 'تصميم حر');
+  return { changes: r.changes as string[], unsupported: r.unsupported as string };
 }
 
 /** Puts the student's own picture on the slide(s) they asked about. */
@@ -347,6 +361,12 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
   if (plan.action === 'answer') { ctx.progress(''); return ctx.say(plan.reply); }
   if (plan.action === 'send_files') { ctx.progress(''); return ctx.say(plan.reply || 'الملفات جاهزة، دوس على الزرار اللي تحت:', 'success', plan.files?.length ? plan.files : filesFor(p)); }
   if (plan.action === 'cover') return editCover(ctx, message, plan.instruction);
+  if (plan.action === 'pick_image') {
+    ctx.progress('');
+    const t = Math.max(0, Math.min(items.length - 1, (plan.targets[0] || (selected ?? 0) + 1) - 1));
+    if (image) { placeImage(ctx, [t], image); return; }
+    return ctx.say(`${plan.reply || 'اختار الصورة اللي تعجبك:'}\nدوس على الزرار، هتلاقي صور مرخّصة للموضوع، أو ارفع صورة من موبايلك.`, 'success', ['pick_image:' + t]);
+  }
   if (plan.action !== 'restyle') ctx.say(plan.reply);
   const targets: number[] = plan.targets.filter((n: number) => n >= 1).map((n: number) => n - 1);
 
@@ -407,7 +427,13 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
     if (Math.abs(after.bodyScale - before.bodyScale) > 0.01) changes.push(`حجم النص ${Math.round(before.bodyScale * 100)}% ← ${Math.round(after.bodyScale * 100)}%`);
     if (after.showNumbers !== before.showNumbers) changes.push(after.showNumbers ? 'أرقام الشرايح ظاهرة' : 'أرقام الشرايح مخفية');
     ctx.progress('');
-    if (!changes.length) return ctx.say('مقدرتش أترجم الطلب ده لتغيير في التنسيق، فما غيّرتش حاجة. جرّب تقولها بشكل تاني، أو افتح 🎨 التنسيق واختار بنفسك.', 'error');
+    if (!changes.length) {
+      ctx.progress('بصمم التعديل…');
+      const free = await applyCss(ctx, message);
+      ctx.progress('');
+      if (!free.changes.length) return ctx.say(`مقدرتش أنفّذ الطلب ده، فما غيّرتش حاجة.${free.unsupported ? `\n⚠️ ${free.unsupported}` : ''}`, 'error');
+      return ctx.say(`اتغيّر فعلًا ✅\n${free.changes.map(c => '- ' + c).join('\n')}${free.unsupported ? `\n⚠️ مقدرش أعمل: ${free.unsupported}` : ''}\nشوف الشرايح، ولو مش عاجبك اكتب "تراجع".`, 'success');
+    }
     await applyStyle(ctx, q => { q.style = after; }, 'تنسيق');
     const customN = ctx.get().slides!.filter(s => s.custom).length;
     return ctx.say(`اتغيّر فعلًا ✅\n${changes.map(c => '- ' + c).join('\n')}${customN ? `\n(الشرايح المصممة خصيصًا (${customN}) بتاخد الألوان والخط الجديد، بس حجم الخط فيها يتغيّر لما تطلب تعديلها هي.)` : ''}`, 'success');
@@ -443,10 +469,15 @@ export async function handleMessage(ctx: Ctx, message: string, selected: number 
     if (f.citationStyle && f.citationStyle !== p.ro!.citationStyle) changes.push('نظام المراجع: ' + f.citationStyle);
     if (st.size !== st0.size) changes.push('حجم الخط: ' + L[st.size]);
     if (st.theme !== st0.theme) changes.push('ستايل الـ PDF: ' + L[st.theme]);
+    let free = { changes: [] as string[], unsupported: f.unsupported as string };
+    if (!changes.length || f.unsupported) { ctx.progress('بصمم التعديل…'); free = await applyCss(ctx, message); }
     ctx.progress('');
-    if (!changes.length) return ctx.say(`مقدرتش أنفّذ الطلب ده، فما غيّرتش أي حاجة.${f.unsupported ? `\n⚠️ مش مدعوم: ${f.unsupported}` : ''}\nجرّب تقولها بشكل تاني، أو افتح 🎨 شكل الـ PDF واختار بنفسك.`, 'error');
+    if (!changes.length && !free.changes.length) return ctx.say(`مقدرتش أنفّذ الطلب ده، فما غيّرتش أي حاجة.${free.unsupported ? `\n⚠️ مش مدعوم: ${free.unsupported}` : ''}\nجرّب تقولها بشكل تاني، أو افتح 🎨 شكل الـ PDF واختار بنفسك.`, 'error');
+    if (!changes.length) return ctx.say(`اتغيّر فعلًا ✅\n${free.changes.map(c => '- ' + c).join('\n')}${free.unsupported ? `\n⚠️ مقدرش أعمل: ${free.unsupported}` : ''}\nالتغيير بيظهر في **PDF Premium**:`, 'success', ['premium_pdf']);
+    f.unsupported = free.changes.length ? free.unsupported : f.unsupported;
+    changes.push(...free.changes);
     snapshot(ctx, 'تنسيق البحث');
-    ctx.update(q => { q.docFormat = d; q.docStyle = st; if (f.citationStyle) q.ro = { ...q.ro!, citationStyle: f.citationStyle }; });
+    ctx.update(q => { q.docFormat = { ...d, css: q.docFormat?.css ?? d.css }; q.docStyle = st; if (f.citationStyle) q.ro = { ...q.ro!, citationStyle: f.citationStyle }; });
     const fixed = d.lineSpacing !== 'auto' && d.lineSpacing !== d0.lineSpacing;
     return ctx.say(`اتغيّر فعلًا ✅\n${changes.map(c => '- ' + c).join('\n')}${fixed ? '\n(مع المسافة الثابتة عدد الصفحات ممكن يختلف عن اللي طلبته.)' : ''}${f.unsupported ? `\n⚠️ مقدرش أعمل: ${f.unsupported}` : ''}\nحمّل الملف من الزرار ده عشان تشوف التغيير:`, 'success', ['premium_pdf']);
   }

@@ -99,3 +99,11 @@ it('answers "why are you stuck" from the real job state', async () => {
   expect(r.action).toBe('answer');
   expect(r.reply).toContain('7');
 });
+
+it('keeps only safe, scoped CSS from the free design layer', async () => {
+  const { sanitizeCss } = await import('../server/v6');
+  const css = sanitizeCss('.mp .hdr{color:red} body{display:none} .mp p{background:url(https://evil/x.png)} @import url(x); .mp .ftr{position:fixed}', 'doc');
+  expect(css).toContain('.mp .hdr{color:red}');
+  expect(css).not.toMatch(/body|https|@import|fixed/);
+  expect(sanitizeCss('.t h2{color:red} .mp p{x:y}', 'deck')).toBe('.t h2{color:red}');
+});

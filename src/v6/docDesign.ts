@@ -24,6 +24,8 @@ export type DocFormat = {
   toc: boolean;
   abstract: boolean;
   header: string;
+  /** Free design layer written by the AI from the student's words (sanitised CSS scoped to .mp). */
+  css?: string;
 };
 export const DEFAULT_FORMAT: DocFormat = { numbering: 'padded', lineSpacing: 'auto', margins: 'normal', pageNumber: 'end', toc: true, abstract: true, header: '' };
 const LH: Record<string, number> = { '1.15': 1.45, '1.5': 1.85, '2': 2.3 };
@@ -192,6 +194,11 @@ function blocks(p: V6Project, used: Source[], t: T, rtl: boolean, f: DocFormat):
     });
     s.tables.forEach((tb, k) => list.push({ kind: 'html', html: `<figure><table><thead><tr>${tb.headers.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${tb.rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody></table><figcaption><b>${rtl ? 'جدول' : 'Table'} ${num}.${k + 1}</b> ${esc(tb.title)}</figcaption></figure>` }));
     if (s.diagram) list.push({ kind: 'html', html: `<figure>${diagram(s.diagram, t)}<figcaption><b>${rtl ? 'شكل' : 'Figure'} ${num}</b> ${esc(s.diagram.title)}</figcaption></figure>` });
+    const fig = (s as any).figure as { data: string; caption: string; credit: string; width: number; height: number } | undefined;
+    if (fig?.data && /^data:image\/(jpeg|png|webp);base64,/.test(fig.data)) {
+      const h = Math.min(360, Math.round(CW * (fig.height / Math.max(1, fig.width))));
+      list.push({ kind: 'html', html: `<figure style="text-align:center"><img src="${fig.data}" alt="" style="max-width:100%;height:${h}px;object-fit:contain;border-radius:10px;border:1px solid #00000012"><figcaption><b>${rtl ? 'صورة' : 'Figure'} ${num}.${s.diagram ? 2 : 1}</b> ${esc(fig.caption || '')}${fig.credit ? `<br><span style="font-weight:400;font-size:10.5px">${esc(fig.credit)}</span>` : ''}</figcaption></figure>` });
+    }
     if (s.keyPoint?.trim()) list.push({ kind: 'html', html: `<div class="kp">${icon('lightbulb', 22, t.accent)}<div><div class="lbl">${rtl ? 'النقطة الأهم' : 'Key point'}</div><div>${esc(s.keyPoint)}</div></div></div>` });
   });
   if (used.length) {
@@ -252,9 +259,10 @@ function paginate(list: Block[], host: HTMLElement): { pages: string[]; secPage:
 
 /* ───────── page chrome ───────── */
 
+let footerText = '';
 function chrome(inner: string, title: string, label: string, n: number, total: number, t: T, f: DocFormat = DEFAULT_FORMAT) {
   const pg = f.pageNumber === 'none' ? '' : `<span class="pg" dir="ltr">${n} / ${total}</span>`;
-  return `<div class="hdr"><span>${esc(f.header || title)}</span><span>${esc(label)}</span></div><div class="content" style="top:${M.top}px;left:${M.side}px;width:${CW}px;height:${CH}px">${inner}</div><div class="ftr ${f.pageNumber === 'center' ? 'c' : f.pageNumber === 'start' ? 's' : ''}"><span class="brand"><b>MIA</b>Medical Intelligence Academy</span>${pg}</div>`;
+  return `<div class="hdr"><span>${esc(f.header || title)}</span><span>${esc(label)}</span></div><div class="content" style="top:${M.top}px;left:${M.side}px;width:${CW}px;height:${CH}px">${inner}</div><div class="ftr ${f.pageNumber === 'center' ? 'c' : f.pageNumber === 'start' ? 's' : ''}"><span class="brand">${esc(footerText)}</span>${pg}</div>`;
 }
 
 function coverPage(p: V6Project, t: T, rtl: boolean, image: string | null) {
@@ -273,7 +281,7 @@ function coverPage(p: V6Project, t: T, rtl: boolean, image: string | null) {
 .cv .top img{width:${PW}px;height:520px;object-fit:cover;display:block}
 .cv .top .shade{position:absolute;inset:0;background:linear-gradient(180deg,${t.cover}00 30%,${t.cover} 100%)}
 .cv .pattern{position:absolute;inset:0}
-.cv .brand{position:absolute;top:44px;${rtl ? 'right' : 'left'}:${M.side}px;display:flex;gap:10px;align-items:center;font-weight:700;font-size:13px;color:${t.coverInk};z-index:2}
+.cv .brand{position:absolute;top:40px;${rtl ? 'right' : 'left'}:${M.side}px;max-height:86px;max-width:240px;object-fit:contain;z-index:2;background:#fff;border-radius:10px;padding:6px}
 .cv .brand b{background:${t.accent};color:#fff;border-radius:7px;padding:3px 9px;font-family:var(--h)}
 .cv .main{position:absolute;left:${M.side}px;right:${M.side}px;top:470px}
 .cv .kind{display:flex;align-items:center;gap:12px;font-weight:800;font-size:13px;letter-spacing:3px;text-transform:uppercase;color:${dark ? t.accent2 : t.accent}}
@@ -283,7 +291,7 @@ function coverPage(p: V6Project, t: T, rtl: boolean, image: string | null) {
 .cv .grid small{display:block;font-size:${Math.round(11 * Math.min(1.4, cs.nameScale))}px;letter-spacing:1.4px;text-transform:uppercase;opacity:.7;margin-bottom:4px;font-weight:700}
 .cv .grid b{font-size:${Math.round(15 * cs.nameScale)}px;font-weight:700;line-height:1.3}
 </style><div class="cv"><div class="top">${image ? `<img src="${image}" alt=""><div class="shade"></div>` : `<svg class="pattern" width="${PW}" height="520" viewBox="0 0 ${PW} 520"><circle cx="${rtl ? 120 : 660}" cy="150" r="250" fill="${t.accent}" opacity=".22"/><circle cx="${rtl ? 220 : 560}" cy="250" r="160" fill="none" stroke="${t.accent2}" stroke-width="2" opacity=".6"/><circle cx="${rtl ? 220 : 560}" cy="250" r="210" fill="none" stroke="${t.coverInk}" stroke-width="1" stroke-dasharray="4 10" opacity=".35"/>${icon(p.kind === 'lab' ? 'microscope' : 'book-open', 120, t.coverInk).replace('<svg ', `<svg x="${rtl ? 160 : 500}" y="190" opacity=".85" `)}</svg><div class="shade"></div>`}</div>
-<div class="brand"><b>MIA</b>Medical Intelligence Academy</div>
+${p.logo && /^data:image\/(jpeg|png|webp);base64,/.test(p.logo) ? `<img class="brand" src="${p.logo}" alt="">` : ''}
 <div class="main"><div class="kind">${kind}</div><h1>${esc(p.title)}</h1></div>
 <div class="grid">${info.join('')}</div></div>`;
 }
@@ -329,7 +337,8 @@ export async function layoutDocument(p: V6Project, st: DocStyle, f: DocFormat = 
       ...[1.5, 1.44].map(lh => ({ fs: +(base - 0.7).toFixed(1), lh, ps: Math.round(base * (lh - 0.66)) })),
     ];
     for (const k of tries) {
-      host.innerHTML = `<style>${css(t, k, rtl)}</style><div class="mp"><div class="content" style="top:${M.top}px;left:${M.side}px;width:${CW}px;height:${CH}px"></div></div>`;
+      host.innerHTML = `<style>${css(t, k, rtl)}
+${f.css || ''}</style><div class="mp"><div class="content" style="top:${M.top}px;left:${M.side}px;width:${CW}px;height:${CH}px"></div></div>`;
       const r = paginate(list, host);
       const diff = Math.abs(r.pages.length - target);
       if (!best || diff < Math.abs(best.pages.length - target) || (diff === Math.abs(best.pages.length - target) && Math.abs(k.lh - 1.7) < Math.abs(best.k.lh - 1.7))) best = { ...r, k };
@@ -342,12 +351,14 @@ export async function layoutDocument(p: V6Project, st: DocStyle, f: DocFormat = 
 export async function buildPremiumPdf(p: V6Project, st: DocStyle, onProgress: (text: string) => void) {
   onProgress('بصمم الصفحات…');
   const L = await layoutDocument(p, st);
+  footerText = p.cover.university || p.cover.faculty || '';
   const front = L.f.toc ? 2 : 1;
   const total = L.pages.length + front;
   const label = L.rtl ? (p.kind === 'lab' ? 'تقرير معملي' : 'بحث أكاديمي') : (p.kind === 'lab' ? 'Laboratory Report' : 'Research Paper');
   let image: string | null = null;
   try { image = (await findImage(p.queries?.[0] || p.title))?.data || null; } catch { image = null; }
-  const style = `${await fontCss({ headingFont: L.t.heading, bodyFont: L.t.body } as any, true)}\n${css(L.t, L.k, L.rtl)}`;
+  const style = `${await fontCss({ headingFont: L.t.heading, bodyFont: L.t.body } as any, true)}\n${css(L.t, L.k, L.rtl)}
+${L.f.css || ''}`;
   const htmlPages = [
     coverPage(p, L.t, L.rtl, image),
     ...(L.f.toc ? [chrome(tocPage(L.tocNames, L.secPage, front + 1, L.rtl, L.f), p.title, label, 2, total, L.t, L.f)] : []),
@@ -361,17 +372,19 @@ export async function buildPremiumPdf(p: V6Project, st: DocStyle, onProgress: (t
     if (i) pdf.addPage('a4', 'portrait');
     pdf.addImage(png, 'JPEG', 0, 0, 210, 297, undefined, 'FAST');
   }
-  pdf.setProperties({ title: p.title, author: p.cover.student || 'MIA Homework Studio', creator: 'MIA Homework Studio' });
+  pdf.setProperties({ title: p.title, author: p.cover.student || '', creator: '' });
   return { blob: pdf.output('blob'), pages: htmlPages.length };
 }
 
 /** Page images for the in-app preview of the designed PDF. */
 export async function previewPages(p: V6Project, st: DocStyle, max = 4) {
   const L = await layoutDocument(p, st);
+  footerText = p.cover.university || p.cover.faculty || '';
   const front = L.f.toc ? 2 : 1;
   const total = L.pages.length + front;
   const label = L.rtl ? 'بحث أكاديمي' : 'Research Paper';
-  const style = `${await fontCss({ headingFont: L.t.heading, bodyFont: L.t.body } as any, true)}\n${css(L.t, L.k, L.rtl)}`;
+  const style = `${await fontCss({ headingFont: L.t.heading, bodyFont: L.t.body } as any, true)}\n${css(L.t, L.k, L.rtl)}
+${L.f.css || ''}`;
   const pages = [coverPage(p, L.t, L.rtl, null), ...(L.f.toc ? [chrome(tocPage(L.tocNames, L.secPage, front + 1, L.rtl, L.f), p.title, label, 2, total, L.t, L.f)] : []), ...L.pages.slice(0, Math.max(0, max - front)).map((inner, i) => chrome(inner, p.title, label, i + front + 1, total, L.t, L.f))];
   return { total, images: await Promise.all(pages.map(h => rasterize(h, style, PW, PH, 0.6, '#ffffff', L.rtl ? 'rtl' : 'ltr', 'mp'))) };
 }

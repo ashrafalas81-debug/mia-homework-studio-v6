@@ -27,11 +27,12 @@ export type SlideData = {
   imageQuery: string;
   /** A picture the student uploaded (data URL). Shown instead of a searched image. */
   userImage?: string;
+  imageCredit?: string;
   source: string;
 };
 
-export type DeckStyle = { titleScale: number; bodyScale: number; headingFont: string; bodyFont: string; palette: string; showNumbers: boolean; coverNameScale?: number; coverTitleScale?: number };
-export type CoverInfo = { presenter: string; institution: string; date: string };
+export type DeckStyle = { titleScale: number; bodyScale: number; headingFont: string; bodyFont: string; palette: string; showNumbers: boolean; coverNameScale?: number; coverTitleScale?: number; customCss?: string };
+export type CoverInfo = { presenter: string; institution: string; date: string; logo?: string };
 
 export const DEFAULT_STYLE: DeckStyle = { titleScale: 1, bodyScale: 1, headingFont: '', bodyFont: '', palette: '', showNumbers: true };
 
@@ -107,6 +108,8 @@ function head(d: SlideData, c: Ctx, opts: { center?: boolean } = {}) {
 function foot(d: SlideData, c: Ctx) {
   return `<div class="foot"><span class="src">${d.source ? esc(d.source) : ''}</span>${c.showNumbers ? `<span class="num" dir="ltr">${c.n} / ${c.total}</span>` : ''}</div>`;
 }
+/** The student's university logo (optional). No app branding on student work. */
+const logoTag = (logo: string | undefined, cls: string) => logo && /^data:image\/(jpeg|png|webp);base64,/.test(logo) ? `<img class="${cls}" src="${logo}" alt="">` : '';
 const wrap = (cls: string, css: string, inner: string) => `<style>${BASE}${css}</style><section class="slide t ${cls}">${inner}</section>`;
 const img = (q: string, w: number, h: number, radius = 24, extra = '', user?: string) => user && /^data:image\/(jpeg|png|webp);base64,/.test(user)
   ? `<img src="${user}" alt="" style="width:${w}px;height:${h}px;border-radius:${radius}px;object-fit:contain;background:#fff;${extra}">`
@@ -133,12 +136,12 @@ const R: Record<Layout, (d: SlideData, c: Ctx) => string> = {
 .cv .r{width:500px;position:relative;flex:none}
 .cv .r img,.cv .r .imgph{position:absolute;inset:44px 44px 44px 0;width:auto!important;height:auto!important;border-radius:220px 28px 28px 28px!important}
 .cv .ring{position:absolute;inset-inline-end:-120px;top:-140px;opacity:.55}
-.cv .brand{position:absolute;bottom:34px;inset-inline-start:84px;display:flex;gap:10px;align-items:center;font-weight:700;font-size:15px;color:var(--muted);z-index:3}
+.cv .brand{position:absolute;bottom:34px;inset-inline-start:84px;max-height:72px;max-width:220px;object-fit:contain;display:flex;gap:10px;align-items:center;font-weight:700;font-size:15px;color:var(--muted);z-index:3}
 .cv .brand b{background:var(--accent);color:var(--bg);border-radius:8px;padding:3px 8px;font-family:var(--hfont)}
 ${c.rtl ? '.cv .r img,.cv .r .imgph{border-radius:28px 220px 28px 28px!important;inset:44px 0 44px 44px}' : ''}`,
       `<svg class="ring" width="520" height="520" viewBox="0 0 520 520"><circle cx="260" cy="260" r="230" fill="none" stroke="var(--accent2)" stroke-width="2" stroke-dasharray="4 12"/><circle cx="260" cy="260" r="170" fill="none" stroke="var(--accent)" stroke-width="2" opacity=".6"/></svg>
-<div class="l"><div class="tag">${esc(d.label || 'Medical Intelligence Academy')}</div><h1 class="clamp4" style="font-size:${ts}px">${esc(d.title)}</h1>${d.subtitle ? `<p class="s clamp3" style="font-size:${fit(d.subtitle, 26, 70, 20, c.bs)}px">${esc(d.subtitle)}</p>` : ''}${meta.length ? `<div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('')}</div>` : ''}</div>
-<div class="r">${img(d.imageQuery, 456, 632, 28, '', d.userImage)}</div><div class="brand"><b>MIA</b>Medical Intelligence Academy</div>`);
+<div class="l">${d.label ? `<div class="tag">${esc(d.label)}</div>` : ''}<h1 class="clamp4" style="font-size:${ts}px">${esc(d.title)}</h1>${d.subtitle ? `<p class="s clamp3" style="font-size:${fit(d.subtitle, 26, 70, 20, c.bs)}px">${esc(d.subtitle)}</p>` : ''}${meta.length ? `<div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('')}</div>` : ''}</div>
+<div class="r">${img(d.imageQuery, 456, 632, 28, '', d.userImage)}</div>${logoTag(c.cover.logo, 'brand')}`);
   },
 
   agenda(d, c) {
@@ -346,9 +349,9 @@ ${c.rtl ? '.cv .r img,.cv .r .imgph{border-radius:28px 220px 28px 28px!important
 .cl h2{font-size:${fit(d.title, 84, 20, 52, c.ts)}px;letter-spacing:-2px}
 .cl .sub{margin-top:18px;max-width:900px}
 .cl .meta{margin-top:40px;display:flex;gap:16px;justify-content:center;font-size:${Math.round(19 * c.bs * c.cn)}px;color:var(--muted)}
-.cl .brand{position:absolute;bottom:40px;left:0;right:0;display:flex;gap:10px;justify-content:center;align-items:center;font-weight:700;font-size:15px;color:var(--muted)}
+.cl .brand{position:absolute;bottom:40px;left:50%;transform:translateX(-50%);max-height:64px;max-width:220px;object-fit:contain;display:flex;gap:10px;justify-content:center;align-items:center;font-weight:700;font-size:15px;color:var(--muted)}
 .cl .brand b{background:var(--accent);color:var(--bg);border-radius:8px;padding:3px 8px;font-family:var(--hfont)}`,
-      `<div class="kicker"></div><h2 class="clamp2">${esc(d.title)}</h2>${d.subtitle ? `<p class="sub clamp2" style="font-size:${Math.round(24 * c.bs)}px">${esc(d.subtitle)}</p>` : ''}${meta.length ? `<div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('<span>·</span>')}</div>` : ''}<div class="brand"><b>MIA</b>Medical Intelligence Academy</div>`);
+      `<div class="kicker"></div><h2 class="clamp2">${esc(d.title)}</h2>${d.subtitle ? `<p class="sub clamp2" style="font-size:${Math.round(24 * c.bs)}px">${esc(d.subtitle)}</p>` : ''}${meta.length ? `<div class="meta">${meta.map(m => `<span>${esc(m)}</span>`).join('<span>·</span>')}</div>` : ''}${logoTag(c.cover.logo, 'brand')}`);
   },
 };
 
@@ -373,5 +376,7 @@ export function normalize(d: Partial<SlideData>): SlideData {
 
 export function renderTemplate(d: SlideData, n: number, total: number, style: DeckStyle, rtl: boolean, cover: CoverInfo, deckTitle = '') {
   const data = normalize(d);
-  return R[data.layout](data, { n, total, ts: style.titleScale, bs: style.bodyScale, rtl, cover, deckTitle, showNumbers: style.showNumbers, cn: style.coverNameScale || 1, ct: style.coverTitleScale || 1 });
+  const credit = data.userImage && data.imageCredit ? `<div class="mia-credit" style="position:absolute;left:16px;bottom:8px;font:400 10px system-ui;color:var(--muted);opacity:.8;max-width:640px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:50">Image: ${esc(data.imageCredit)}</div>` : '';
+  const custom = style.customCss ? `<style>${style.customCss}</style>` : '';
+  return custom + R[data.layout](data, { n, total, ts: style.titleScale, bs: style.bodyScale, rtl, cover, deckTitle, showNumbers: style.showNumbers, cn: style.coverNameScale || 1, ct: style.coverTitleScale || 1 }).replace(/<\/section>\s*$/, credit + '</section>');
 }

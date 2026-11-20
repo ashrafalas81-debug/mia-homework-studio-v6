@@ -136,7 +136,7 @@ export async function exportPptx(title: string, slides: SlideState[], theme: Dec
   const { default: PptxGenJS } = await import('pptxgenjs');
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
-  pptx.title = title; pptx.company = 'Medical Intelligence Academy'; pptx.author = 'MIA Homework Studio';
+  pptx.title = title; pptx.company = ''; pptx.author = '';
   let i = 0;
   for (const s of slides) {
     if (s.status !== 'done') continue;
